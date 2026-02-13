@@ -1,0 +1,20 @@
+make[1]: Entering directory '/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa'
+/opt/riscv32/bin/riscv32-unknown-elf-gcc -O0  -march=rv32ima_zifencei -mabi=ilp32 -mcmodel=medlow  -O2 --specs=nosys.specs  -gdwarf -I. -Imacros/scalar -c -o build/rv32ui/or/or.o rv32ui/or.S
+In file included from rv32ui/../rv64ui/or.S:11,
+                 from rv32ui/or.S:7:
+macros/scalar/test_macros.h:818:9: warning: 'TEST_PASSFAIL' redefined
+  818 | #define TEST_PASSFAIL \
+      |         ^~~~~~~~~~~~~
+In file included from rv32ui/or.S:3:
+./riscv_test.h:28:9: note: this is the location of the previous definition
+   28 | #define TEST_PASSFAIL                                                   \
+      |         ^~~~~~~~~~~~~
+/opt/riscv32/bin/riscv32-unknown-elf-gcc -O0  -march=rv32ima_zifencei -mabi=ilp32 -mcmodel=medlow  -O2 --specs=nosys.specs  -gdwarf -I. -Imacros/scalar -c -o build/rv32ui/or/start.o ../../start.S
+/opt/riscv32/bin/riscv32-unknown-elf-gcc -O0  -march=rv32ima_zifencei -mabi=ilp32 -mcmodel=medlow  -O2 --specs=nosys.specs  -gdwarf -I. -Imacros/scalar -c -o build/rv32ui/or/uart.o ../../lib/uart.c
+/opt/riscv32/bin/riscv32-unknown-elf-gcc -O0  -march=rv32ima_zifencei -mabi=ilp32 -mcmodel=medlow  -O2 --specs=nosys.specs  -gdwarf -I. -Imacros/scalar -c -o build/rv32ui/or/utils.o ../../lib/utils.c
+/opt/riscv32/bin/riscv32-unknown-elf-gcc -O0  -march=rv32ima_zifencei -mabi=ilp32 -mcmodel=medlow  -O2 --specs=nosys.specs  -gdwarf -I. -Imacros/scalar -c -o build/rv32ui/or/xprintf.o ../../lib/xprintf.c
+/opt/riscv32/bin/riscv32-unknown-elf-gcc -O0  -march=rv32ima_zifencei -mabi=ilp32 -mcmodel=medlow  -O2 --specs=nosys.specs  -gdwarf -I. -Imacros/scalar build/rv32ui/or/or.o build/rv32ui/or/start.o build/rv32ui/or/uart.o build/rv32ui/or/utils.o build/rv32ui/or/xprintf.o -o build/rv32ui/or/or -T ../../link.lds -nostartfiles -Wl,--gc-sections -Wl,--check-sections
+/opt/riscv32/lib/gcc/riscv32-unknown-elf/15.1.0/../../../../riscv32-unknown-elf/bin/ld: warning: build/rv32ui/or/or has a LOAD segment with RWX permissions
+/opt/riscv32/bin/riscv32-unknown-elf-objcopy -O binary build/rv32ui/or/or build/rv32ui/or/or.bin
+/opt/riscv32/bin/riscv32-unknown-elf-objdump -alDS -M no-aliases build/rv32ui/or/or > build/rv32ui/or/or.dump
+make[1]: Leaving directory '/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa'

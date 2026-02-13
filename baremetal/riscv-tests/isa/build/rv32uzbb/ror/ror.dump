@@ -1,0 +1,1008 @@
+
+build/rv32uzbb/ror/ror:     file format elf32-littleriscv
+build/rv32uzbb/ror/ror
+
+
+Disassembly of section .init:
+
+80000000 <_start>:
+_start():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/../../start.S:9
+    .type _start,@function
+
+
+_start:
+
+  la gp, __global_pointer
+80000000:	00001197          	auipc	gp,0x1
+80000004:	da818193          	addi	gp,gp,-600 # 80000da8 <__global_pointer>
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/../../start.S:10
+  la sp, _sp
+80000008:	08000117          	auipc	sp,0x8000
+8000000c:	ff810113          	addi	sp,sp,-8 # 88000000 <_sp>
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/../../start.S:12
+
+  call main
+80000010:	00c000ef          	jal	ra,8000001c <main>
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/../../start.S:13
+  ebreak
+80000014:	00100073          	ebreak
+
+80000018 <loop>:
+loop():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/../../start.S:16
+
+loop:
+    j loop
+80000018:	0000006f          	jal	zero,80000018 <loop>
+
+Disassembly of section .text:
+
+8000001c <main>:
+test_2():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:20
+
+  #-------------------------------------------------------------
+  # Arithmetic tests
+  #-------------------------------------------------------------
+
+  TEST_RR_OP( 2,  ror, 0x00000001, 0x00000001, 0  );
+8000001c:	00200193          	addi	gp,zero,2
+80000020:	00100593          	addi	a1,zero,1
+80000024:	00000613          	addi	a2,zero,0
+80000028:	60c5d733          	ror	a4,a1,a2
+8000002c:	00100393          	addi	t2,zero,1
+80000030:	56771463          	bne	a4,t2,80000598 <fail>
+
+80000034 <test_3>:
+test_3():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:21
+  TEST_RR_OP( 3,  ror, 0x80000000, 0x00000001, 1  );
+80000034:	00300193          	addi	gp,zero,3
+80000038:	00100593          	addi	a1,zero,1
+8000003c:	00100613          	addi	a2,zero,1
+80000040:	60c5d733          	ror	a4,a1,a2
+80000044:	800003b7          	lui	t2,0x80000
+80000048:	54771863          	bne	a4,t2,80000598 <fail>
+
+8000004c <test_4>:
+test_4():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:22
+  TEST_RR_OP( 4,  ror, 0x02000000, 0x00000001, 7  );
+8000004c:	00400193          	addi	gp,zero,4
+80000050:	00100593          	addi	a1,zero,1
+80000054:	00700613          	addi	a2,zero,7
+80000058:	60c5d733          	ror	a4,a1,a2
+8000005c:	020003b7          	lui	t2,0x2000
+80000060:	52771c63          	bne	a4,t2,80000598 <fail>
+
+80000064 <test_5>:
+test_5():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:23
+  TEST_RR_OP( 5,  ror, 0x00040000, 0x00000001, 14 );
+80000064:	00500193          	addi	gp,zero,5
+80000068:	00100593          	addi	a1,zero,1
+8000006c:	00e00613          	addi	a2,zero,14
+80000070:	60c5d733          	ror	a4,a1,a2
+80000074:	000403b7          	lui	t2,0x40
+80000078:	52771063          	bne	a4,t2,80000598 <fail>
+
+8000007c <test_6>:
+test_6():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:24
+  TEST_RR_OP( 6,  ror, 0x00000002, 0x00000001, 31 );
+8000007c:	00600193          	addi	gp,zero,6
+80000080:	00100593          	addi	a1,zero,1
+80000084:	01f00613          	addi	a2,zero,31
+80000088:	60c5d733          	ror	a4,a1,a2
+8000008c:	00200393          	addi	t2,zero,2
+80000090:	50771463          	bne	a4,t2,80000598 <fail>
+
+80000094 <test_7>:
+test_7():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:26
+
+  TEST_RR_OP( 7,  ror, 0xffffffff, 0xffffffff, 0  );
+80000094:	00700193          	addi	gp,zero,7
+80000098:	fff00593          	addi	a1,zero,-1
+8000009c:	00000613          	addi	a2,zero,0
+800000a0:	60c5d733          	ror	a4,a1,a2
+800000a4:	fff00393          	addi	t2,zero,-1
+800000a8:	4e771863          	bne	a4,t2,80000598 <fail>
+
+800000ac <test_8>:
+test_8():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:27
+  TEST_RR_OP( 8,  ror, 0xffffffff, 0xffffffff, 1  );
+800000ac:	00800193          	addi	gp,zero,8
+800000b0:	fff00593          	addi	a1,zero,-1
+800000b4:	00100613          	addi	a2,zero,1
+800000b8:	60c5d733          	ror	a4,a1,a2
+800000bc:	fff00393          	addi	t2,zero,-1
+800000c0:	4c771c63          	bne	a4,t2,80000598 <fail>
+
+800000c4 <test_9>:
+test_9():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:28
+  TEST_RR_OP( 9,  ror, 0xffffffff, 0xffffffff, 7  );
+800000c4:	00900193          	addi	gp,zero,9
+800000c8:	fff00593          	addi	a1,zero,-1
+800000cc:	00700613          	addi	a2,zero,7
+800000d0:	60c5d733          	ror	a4,a1,a2
+800000d4:	fff00393          	addi	t2,zero,-1
+800000d8:	4c771063          	bne	a4,t2,80000598 <fail>
+
+800000dc <test_10>:
+test_10():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:29
+  TEST_RR_OP( 10, ror, 0xffffffff, 0xffffffff, 14 );
+800000dc:	00a00193          	addi	gp,zero,10
+800000e0:	fff00593          	addi	a1,zero,-1
+800000e4:	00e00613          	addi	a2,zero,14
+800000e8:	60c5d733          	ror	a4,a1,a2
+800000ec:	fff00393          	addi	t2,zero,-1
+800000f0:	4a771463          	bne	a4,t2,80000598 <fail>
+
+800000f4 <test_11>:
+test_11():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:30
+  TEST_RR_OP( 11, ror, 0xffffffff, 0xffffffff, 31 );
+800000f4:	00b00193          	addi	gp,zero,11
+800000f8:	fff00593          	addi	a1,zero,-1
+800000fc:	01f00613          	addi	a2,zero,31
+80000100:	60c5d733          	ror	a4,a1,a2
+80000104:	fff00393          	addi	t2,zero,-1
+80000108:	48771863          	bne	a4,t2,80000598 <fail>
+
+8000010c <test_12>:
+test_12():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:32
+
+  TEST_RR_OP( 12, ror, 0x21212121, 0x21212121, 0  );
+8000010c:	00c00193          	addi	gp,zero,12
+80000110:	212125b7          	lui	a1,0x21212
+80000114:	12158593          	addi	a1,a1,289 # 21212121 <__stack_size+0x1f212121>
+80000118:	00000613          	addi	a2,zero,0
+8000011c:	60c5d733          	ror	a4,a1,a2
+80000120:	212123b7          	lui	t2,0x21212
+80000124:	12138393          	addi	t2,t2,289 # 21212121 <__stack_size+0x1f212121>
+80000128:	46771863          	bne	a4,t2,80000598 <fail>
+
+8000012c <test_13>:
+test_13():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:33
+  TEST_RR_OP( 13, ror, 0x90909090, 0x21212121, 1  );
+8000012c:	00d00193          	addi	gp,zero,13
+80000130:	212125b7          	lui	a1,0x21212
+80000134:	12158593          	addi	a1,a1,289 # 21212121 <__stack_size+0x1f212121>
+80000138:	00100613          	addi	a2,zero,1
+8000013c:	60c5d733          	ror	a4,a1,a2
+80000140:	909093b7          	lui	t2,0x90909
+80000144:	09038393          	addi	t2,t2,144 # 90909090 <_sp+0x8909090>
+80000148:	44771863          	bne	a4,t2,80000598 <fail>
+
+8000014c <test_14>:
+test_14():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:34
+  TEST_RR_OP( 14, ror, 0x42424242, 0x21212121, 7  );
+8000014c:	00e00193          	addi	gp,zero,14
+80000150:	212125b7          	lui	a1,0x21212
+80000154:	12158593          	addi	a1,a1,289 # 21212121 <__stack_size+0x1f212121>
+80000158:	00700613          	addi	a2,zero,7
+8000015c:	60c5d733          	ror	a4,a1,a2
+80000160:	424243b7          	lui	t2,0x42424
+80000164:	24238393          	addi	t2,t2,578 # 42424242 <__stack_size+0x40424242>
+80000168:	42771863          	bne	a4,t2,80000598 <fail>
+
+8000016c <test_15>:
+test_15():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:35
+  TEST_RR_OP( 15, ror, 0x84848484, 0x21212121, 14 );
+8000016c:	00f00193          	addi	gp,zero,15
+80000170:	212125b7          	lui	a1,0x21212
+80000174:	12158593          	addi	a1,a1,289 # 21212121 <__stack_size+0x1f212121>
+80000178:	00e00613          	addi	a2,zero,14
+8000017c:	60c5d733          	ror	a4,a1,a2
+80000180:	848483b7          	lui	t2,0x84848
+80000184:	48438393          	addi	t2,t2,1156 # 84848484 <__global_pointer+0x48476dc>
+80000188:	40771863          	bne	a4,t2,80000598 <fail>
+
+8000018c <test_16>:
+test_16():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:36
+  TEST_RR_OP( 16, ror, 0x42424242, 0x21212121, 31 );
+8000018c:	01000193          	addi	gp,zero,16
+80000190:	212125b7          	lui	a1,0x21212
+80000194:	12158593          	addi	a1,a1,289 # 21212121 <__stack_size+0x1f212121>
+80000198:	01f00613          	addi	a2,zero,31
+8000019c:	60c5d733          	ror	a4,a1,a2
+800001a0:	424243b7          	lui	t2,0x42424
+800001a4:	24238393          	addi	t2,t2,578 # 42424242 <__stack_size+0x40424242>
+800001a8:	3e771863          	bne	a4,t2,80000598 <fail>
+
+800001ac <test_17>:
+test_17():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:40
+
+  # Verify that shifts only use bottom six(rv64) or five(rv32) bits
+
+  TEST_RR_OP( 17, ror, 0x21212121, 0x21212121, 0xffffffc0 );
+800001ac:	01100193          	addi	gp,zero,17
+800001b0:	212125b7          	lui	a1,0x21212
+800001b4:	12158593          	addi	a1,a1,289 # 21212121 <__stack_size+0x1f212121>
+800001b8:	fc000613          	addi	a2,zero,-64
+800001bc:	60c5d733          	ror	a4,a1,a2
+800001c0:	212123b7          	lui	t2,0x21212
+800001c4:	12138393          	addi	t2,t2,289 # 21212121 <__stack_size+0x1f212121>
+800001c8:	3c771863          	bne	a4,t2,80000598 <fail>
+
+800001cc <test_18>:
+test_18():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:41
+  TEST_RR_OP( 18, ror, 0x90909090, 0x21212121, 0xffffffc1 );
+800001cc:	01200193          	addi	gp,zero,18
+800001d0:	212125b7          	lui	a1,0x21212
+800001d4:	12158593          	addi	a1,a1,289 # 21212121 <__stack_size+0x1f212121>
+800001d8:	fc100613          	addi	a2,zero,-63
+800001dc:	60c5d733          	ror	a4,a1,a2
+800001e0:	909093b7          	lui	t2,0x90909
+800001e4:	09038393          	addi	t2,t2,144 # 90909090 <_sp+0x8909090>
+800001e8:	3a771863          	bne	a4,t2,80000598 <fail>
+
+800001ec <test_19>:
+test_19():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:42
+  TEST_RR_OP( 19, ror, 0x42424242, 0x21212121, 0xffffffc7 );
+800001ec:	01300193          	addi	gp,zero,19
+800001f0:	212125b7          	lui	a1,0x21212
+800001f4:	12158593          	addi	a1,a1,289 # 21212121 <__stack_size+0x1f212121>
+800001f8:	fc700613          	addi	a2,zero,-57
+800001fc:	60c5d733          	ror	a4,a1,a2
+80000200:	424243b7          	lui	t2,0x42424
+80000204:	24238393          	addi	t2,t2,578 # 42424242 <__stack_size+0x40424242>
+80000208:	38771863          	bne	a4,t2,80000598 <fail>
+
+8000020c <test_20>:
+test_20():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:43
+  TEST_RR_OP( 20, ror, 0x84848484, 0x21212121, 0xffffffce );
+8000020c:	01400193          	addi	gp,zero,20
+80000210:	212125b7          	lui	a1,0x21212
+80000214:	12158593          	addi	a1,a1,289 # 21212121 <__stack_size+0x1f212121>
+80000218:	fce00613          	addi	a2,zero,-50
+8000021c:	60c5d733          	ror	a4,a1,a2
+80000220:	848483b7          	lui	t2,0x84848
+80000224:	48438393          	addi	t2,t2,1156 # 84848484 <__global_pointer+0x48476dc>
+80000228:	36771863          	bne	a4,t2,80000598 <fail>
+
+8000022c <test_21>:
+test_21():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:45
+
+  TEST_RR_OP( 21, ror, 0x42424242, 0x21212121, 0xffffffff );
+8000022c:	01500193          	addi	gp,zero,21
+80000230:	212125b7          	lui	a1,0x21212
+80000234:	12158593          	addi	a1,a1,289 # 21212121 <__stack_size+0x1f212121>
+80000238:	fff00613          	addi	a2,zero,-1
+8000023c:	60c5d733          	ror	a4,a1,a2
+80000240:	424243b7          	lui	t2,0x42424
+80000244:	24238393          	addi	t2,t2,578 # 42424242 <__stack_size+0x40424242>
+80000248:	34771863          	bne	a4,t2,80000598 <fail>
+
+8000024c <test_22>:
+test_22():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:51
+
+  #-------------------------------------------------------------
+  # Source/Destination tests
+  #-------------------------------------------------------------
+
+  TEST_RR_SRC1_EQ_DEST( 22, ror, 0x02000000, 0x00000001, 7  );
+8000024c:	01600193          	addi	gp,zero,22
+80000250:	00100593          	addi	a1,zero,1
+80000254:	00700613          	addi	a2,zero,7
+80000258:	60c5d5b3          	ror	a1,a1,a2
+8000025c:	020003b7          	lui	t2,0x2000
+80000260:	32759c63          	bne	a1,t2,80000598 <fail>
+
+80000264 <test_23>:
+test_23():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:52
+  TEST_RR_SRC2_EQ_DEST( 23, ror, 0x00040000, 0x00000001, 14 );
+80000264:	01700193          	addi	gp,zero,23
+80000268:	00100593          	addi	a1,zero,1
+8000026c:	00e00613          	addi	a2,zero,14
+80000270:	60c5d633          	ror	a2,a1,a2
+80000274:	000403b7          	lui	t2,0x40
+80000278:	32761063          	bne	a2,t2,80000598 <fail>
+
+8000027c <test_24>:
+test_24():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:53
+  TEST_RR_SRC12_EQ_DEST( 24, ror, 0x60000000, 3 );
+8000027c:	01800193          	addi	gp,zero,24
+80000280:	00300593          	addi	a1,zero,3
+80000284:	60b5d5b3          	ror	a1,a1,a1
+80000288:	600003b7          	lui	t2,0x60000
+8000028c:	30759663          	bne	a1,t2,80000598 <fail>
+
+80000290 <test_25>:
+test_25():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:59
+
+  #-------------------------------------------------------------
+  # Bypassing tests
+  #-------------------------------------------------------------
+
+  TEST_RR_DEST_BYPASS( 25, 0, ror, 0x02000000, 0x00000001, 7  );
+80000290:	01900193          	addi	gp,zero,25
+80000294:	00000213          	addi	tp,zero,0
+80000298:	00100093          	addi	ra,zero,1
+8000029c:	00700113          	addi	sp,zero,7
+800002a0:	6020d733          	ror	a4,ra,sp
+800002a4:	00070313          	addi	t1,a4,0
+800002a8:	00120213          	addi	tp,tp,1 # 1 <__stack_size-0x1ffffff>
+800002ac:	00200293          	addi	t0,zero,2
+800002b0:	fe5214e3          	bne	tp,t0,80000298 <test_25+0x8>
+800002b4:	020003b7          	lui	t2,0x2000
+800002b8:	2e731063          	bne	t1,t2,80000598 <fail>
+
+800002bc <test_26>:
+test_26():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:60
+  TEST_RR_DEST_BYPASS( 26, 1, ror, 0x00040000, 0x00000001, 14 );
+800002bc:	01a00193          	addi	gp,zero,26
+800002c0:	00000213          	addi	tp,zero,0
+800002c4:	00100093          	addi	ra,zero,1
+800002c8:	00e00113          	addi	sp,zero,14
+800002cc:	6020d733          	ror	a4,ra,sp
+800002d0:	00000013          	addi	zero,zero,0
+800002d4:	00070313          	addi	t1,a4,0
+800002d8:	00120213          	addi	tp,tp,1 # 1 <__stack_size-0x1ffffff>
+800002dc:	00200293          	addi	t0,zero,2
+800002e0:	fe5212e3          	bne	tp,t0,800002c4 <test_26+0x8>
+800002e4:	000403b7          	lui	t2,0x40
+800002e8:	2a731863          	bne	t1,t2,80000598 <fail>
+
+800002ec <test_27>:
+test_27():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:61
+  TEST_RR_DEST_BYPASS( 27, 2, ror, 0x00000002, 0x00000001, 31 );
+800002ec:	01b00193          	addi	gp,zero,27
+800002f0:	00000213          	addi	tp,zero,0
+800002f4:	00100093          	addi	ra,zero,1
+800002f8:	01f00113          	addi	sp,zero,31
+800002fc:	6020d733          	ror	a4,ra,sp
+80000300:	00000013          	addi	zero,zero,0
+80000304:	00000013          	addi	zero,zero,0
+80000308:	00070313          	addi	t1,a4,0
+8000030c:	00120213          	addi	tp,tp,1 # 1 <__stack_size-0x1ffffff>
+80000310:	00200293          	addi	t0,zero,2
+80000314:	fe5210e3          	bne	tp,t0,800002f4 <test_27+0x8>
+80000318:	00200393          	addi	t2,zero,2
+8000031c:	26731e63          	bne	t1,t2,80000598 <fail>
+
+80000320 <test_28>:
+test_28():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:63
+
+  TEST_RR_SRC12_BYPASS( 28, 0, 0, ror, 0x02000000, 0x00000001, 7  );
+80000320:	01c00193          	addi	gp,zero,28
+80000324:	00000213          	addi	tp,zero,0
+80000328:	00100093          	addi	ra,zero,1
+8000032c:	00700113          	addi	sp,zero,7
+80000330:	6020d733          	ror	a4,ra,sp
+80000334:	00120213          	addi	tp,tp,1 # 1 <__stack_size-0x1ffffff>
+80000338:	00200293          	addi	t0,zero,2
+8000033c:	fe5216e3          	bne	tp,t0,80000328 <test_28+0x8>
+80000340:	020003b7          	lui	t2,0x2000
+80000344:	24771a63          	bne	a4,t2,80000598 <fail>
+
+80000348 <test_29>:
+test_29():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:64
+  TEST_RR_SRC12_BYPASS( 29, 0, 1, ror, 0x00040000, 0x00000001, 14 );
+80000348:	01d00193          	addi	gp,zero,29
+8000034c:	00000213          	addi	tp,zero,0
+80000350:	00100093          	addi	ra,zero,1
+80000354:	00e00113          	addi	sp,zero,14
+80000358:	00000013          	addi	zero,zero,0
+8000035c:	6020d733          	ror	a4,ra,sp
+80000360:	00120213          	addi	tp,tp,1 # 1 <__stack_size-0x1ffffff>
+80000364:	00200293          	addi	t0,zero,2
+80000368:	fe5214e3          	bne	tp,t0,80000350 <test_29+0x8>
+8000036c:	000403b7          	lui	t2,0x40
+80000370:	22771463          	bne	a4,t2,80000598 <fail>
+
+80000374 <test_30>:
+test_30():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:65
+  TEST_RR_SRC12_BYPASS( 30, 0, 2, ror, 0x00000002, 0x00000001, 31 );
+80000374:	01e00193          	addi	gp,zero,30
+80000378:	00000213          	addi	tp,zero,0
+8000037c:	00100093          	addi	ra,zero,1
+80000380:	01f00113          	addi	sp,zero,31
+80000384:	00000013          	addi	zero,zero,0
+80000388:	00000013          	addi	zero,zero,0
+8000038c:	6020d733          	ror	a4,ra,sp
+80000390:	00120213          	addi	tp,tp,1 # 1 <__stack_size-0x1ffffff>
+80000394:	00200293          	addi	t0,zero,2
+80000398:	fe5212e3          	bne	tp,t0,8000037c <test_30+0x8>
+8000039c:	00200393          	addi	t2,zero,2
+800003a0:	1e771c63          	bne	a4,t2,80000598 <fail>
+
+800003a4 <test_31>:
+test_31():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:66
+  TEST_RR_SRC12_BYPASS( 31, 1, 0, ror, 0x02000000, 0x00000001, 7  );
+800003a4:	01f00193          	addi	gp,zero,31
+800003a8:	00000213          	addi	tp,zero,0
+800003ac:	00100093          	addi	ra,zero,1
+800003b0:	00000013          	addi	zero,zero,0
+800003b4:	00700113          	addi	sp,zero,7
+800003b8:	6020d733          	ror	a4,ra,sp
+800003bc:	00120213          	addi	tp,tp,1 # 1 <__stack_size-0x1ffffff>
+800003c0:	00200293          	addi	t0,zero,2
+800003c4:	fe5214e3          	bne	tp,t0,800003ac <test_31+0x8>
+800003c8:	020003b7          	lui	t2,0x2000
+800003cc:	1c771663          	bne	a4,t2,80000598 <fail>
+
+800003d0 <test_32>:
+test_32():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:67
+  TEST_RR_SRC12_BYPASS( 32, 1, 1, ror, 0x00040000, 0x00000001, 14 );
+800003d0:	02000193          	addi	gp,zero,32
+800003d4:	00000213          	addi	tp,zero,0
+800003d8:	00100093          	addi	ra,zero,1
+800003dc:	00000013          	addi	zero,zero,0
+800003e0:	00e00113          	addi	sp,zero,14
+800003e4:	00000013          	addi	zero,zero,0
+800003e8:	6020d733          	ror	a4,ra,sp
+800003ec:	00120213          	addi	tp,tp,1 # 1 <__stack_size-0x1ffffff>
+800003f0:	00200293          	addi	t0,zero,2
+800003f4:	fe5212e3          	bne	tp,t0,800003d8 <test_32+0x8>
+800003f8:	000403b7          	lui	t2,0x40
+800003fc:	18771e63          	bne	a4,t2,80000598 <fail>
+
+80000400 <test_33>:
+test_33():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:68
+  TEST_RR_SRC12_BYPASS( 33, 2, 0, ror, 0x00000002, 0x00000001, 31 );
+80000400:	02100193          	addi	gp,zero,33
+80000404:	00000213          	addi	tp,zero,0
+80000408:	00100093          	addi	ra,zero,1
+8000040c:	00000013          	addi	zero,zero,0
+80000410:	00000013          	addi	zero,zero,0
+80000414:	01f00113          	addi	sp,zero,31
+80000418:	6020d733          	ror	a4,ra,sp
+8000041c:	00120213          	addi	tp,tp,1 # 1 <__stack_size-0x1ffffff>
+80000420:	00200293          	addi	t0,zero,2
+80000424:	fe5212e3          	bne	tp,t0,80000408 <test_33+0x8>
+80000428:	00200393          	addi	t2,zero,2
+8000042c:	16771663          	bne	a4,t2,80000598 <fail>
+
+80000430 <test_34>:
+test_34():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:70
+
+  TEST_RR_SRC21_BYPASS( 34, 0, 0, ror, 0x02000000, 0x00000001, 7  );
+80000430:	02200193          	addi	gp,zero,34
+80000434:	00000213          	addi	tp,zero,0
+80000438:	00700113          	addi	sp,zero,7
+8000043c:	00100093          	addi	ra,zero,1
+80000440:	6020d733          	ror	a4,ra,sp
+80000444:	00120213          	addi	tp,tp,1 # 1 <__stack_size-0x1ffffff>
+80000448:	00200293          	addi	t0,zero,2
+8000044c:	fe5216e3          	bne	tp,t0,80000438 <test_34+0x8>
+80000450:	020003b7          	lui	t2,0x2000
+80000454:	14771263          	bne	a4,t2,80000598 <fail>
+
+80000458 <test_35>:
+test_35():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:71
+  TEST_RR_SRC21_BYPASS( 35, 0, 1, ror, 0x00040000, 0x00000001, 14 );
+80000458:	02300193          	addi	gp,zero,35
+8000045c:	00000213          	addi	tp,zero,0
+80000460:	00e00113          	addi	sp,zero,14
+80000464:	00100093          	addi	ra,zero,1
+80000468:	00000013          	addi	zero,zero,0
+8000046c:	6020d733          	ror	a4,ra,sp
+80000470:	00120213          	addi	tp,tp,1 # 1 <__stack_size-0x1ffffff>
+80000474:	00200293          	addi	t0,zero,2
+80000478:	fe5214e3          	bne	tp,t0,80000460 <test_35+0x8>
+8000047c:	000403b7          	lui	t2,0x40
+80000480:	10771c63          	bne	a4,t2,80000598 <fail>
+
+80000484 <test_36>:
+test_36():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:72
+  TEST_RR_SRC21_BYPASS( 36, 0, 2, ror, 0x00000002, 0x00000001, 31 );
+80000484:	02400193          	addi	gp,zero,36
+80000488:	00000213          	addi	tp,zero,0
+8000048c:	01f00113          	addi	sp,zero,31
+80000490:	00100093          	addi	ra,zero,1
+80000494:	00000013          	addi	zero,zero,0
+80000498:	00000013          	addi	zero,zero,0
+8000049c:	6020d733          	ror	a4,ra,sp
+800004a0:	00120213          	addi	tp,tp,1 # 1 <__stack_size-0x1ffffff>
+800004a4:	00200293          	addi	t0,zero,2
+800004a8:	fe5212e3          	bne	tp,t0,8000048c <test_36+0x8>
+800004ac:	00200393          	addi	t2,zero,2
+800004b0:	0e771463          	bne	a4,t2,80000598 <fail>
+
+800004b4 <test_37>:
+test_37():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:73
+  TEST_RR_SRC21_BYPASS( 37, 1, 0, ror, 0x02000000, 0x00000001, 7  );
+800004b4:	02500193          	addi	gp,zero,37
+800004b8:	00000213          	addi	tp,zero,0
+800004bc:	00700113          	addi	sp,zero,7
+800004c0:	00000013          	addi	zero,zero,0
+800004c4:	00100093          	addi	ra,zero,1
+800004c8:	6020d733          	ror	a4,ra,sp
+800004cc:	00120213          	addi	tp,tp,1 # 1 <__stack_size-0x1ffffff>
+800004d0:	00200293          	addi	t0,zero,2
+800004d4:	fe5214e3          	bne	tp,t0,800004bc <test_37+0x8>
+800004d8:	020003b7          	lui	t2,0x2000
+800004dc:	0a771e63          	bne	a4,t2,80000598 <fail>
+
+800004e0 <test_38>:
+test_38():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:74
+  TEST_RR_SRC21_BYPASS( 38, 1, 1, ror, 0x00040000, 0x00000001, 14 );
+800004e0:	02600193          	addi	gp,zero,38
+800004e4:	00000213          	addi	tp,zero,0
+800004e8:	00e00113          	addi	sp,zero,14
+800004ec:	00000013          	addi	zero,zero,0
+800004f0:	00100093          	addi	ra,zero,1
+800004f4:	00000013          	addi	zero,zero,0
+800004f8:	6020d733          	ror	a4,ra,sp
+800004fc:	00120213          	addi	tp,tp,1 # 1 <__stack_size-0x1ffffff>
+80000500:	00200293          	addi	t0,zero,2
+80000504:	fe5212e3          	bne	tp,t0,800004e8 <test_38+0x8>
+80000508:	000403b7          	lui	t2,0x40
+8000050c:	08771663          	bne	a4,t2,80000598 <fail>
+
+80000510 <test_39>:
+test_39():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:75
+  TEST_RR_SRC21_BYPASS( 39, 2, 0, ror, 0x00000002, 0x00000001, 31 );
+80000510:	02700193          	addi	gp,zero,39
+80000514:	00000213          	addi	tp,zero,0
+80000518:	01f00113          	addi	sp,zero,31
+8000051c:	00000013          	addi	zero,zero,0
+80000520:	00000013          	addi	zero,zero,0
+80000524:	00100093          	addi	ra,zero,1
+80000528:	6020d733          	ror	a4,ra,sp
+8000052c:	00120213          	addi	tp,tp,1 # 1 <__stack_size-0x1ffffff>
+80000530:	00200293          	addi	t0,zero,2
+80000534:	fe5212e3          	bne	tp,t0,80000518 <test_39+0x8>
+80000538:	00200393          	addi	t2,zero,2
+8000053c:	04771e63          	bne	a4,t2,80000598 <fail>
+
+80000540 <test_40>:
+test_40():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:77
+
+  TEST_RR_ZEROSRC1( 40, ror, 0, 15 );
+80000540:	02800193          	addi	gp,zero,40
+80000544:	00f00093          	addi	ra,zero,15
+80000548:	60105133          	ror	sp,zero,ra
+8000054c:	00000393          	addi	t2,zero,0
+80000550:	04711463          	bne	sp,t2,80000598 <fail>
+
+80000554 <test_41>:
+test_41():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:78
+  TEST_RR_ZEROSRC2( 41, ror, 32, 32 );
+80000554:	02900193          	addi	gp,zero,41
+80000558:	02000093          	addi	ra,zero,32
+8000055c:	6000d133          	ror	sp,ra,zero
+80000560:	02000393          	addi	t2,zero,32
+80000564:	02711a63          	bne	sp,t2,80000598 <fail>
+
+80000568 <test_42>:
+test_42():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:79
+  TEST_RR_ZEROSRC12( 42, ror, 0 );
+80000568:	02a00193          	addi	gp,zero,42
+8000056c:	600050b3          	ror	ra,zero,zero
+80000570:	00000393          	addi	t2,zero,0
+80000574:	02709263          	bne	ra,t2,80000598 <fail>
+
+80000578 <test_43>:
+test_43():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:80
+  TEST_RR_ZERODEST( 43, ror, 1024, 2048 );
+80000578:	02b00193          	addi	gp,zero,43
+8000057c:	40000093          	addi	ra,zero,1024
+80000580:	00001137          	lui	sp,0x1
+80000584:	80010113          	addi	sp,sp,-2048 # 800 <__stack_size-0x1fff800>
+80000588:	6020d033          	ror	zero,ra,sp
+8000058c:	00000393          	addi	t2,zero,0
+80000590:	00701463          	bne	zero,t2,80000598 <fail>
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:82
+
+  TEST_PASSFAIL
+80000594:	00301663          	bne	zero,gp,800005a0 <pass>
+
+80000598 <fail>:
+fail():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:82
+80000598:	00100513          	addi	a0,zero,1
+8000059c:	00100073          	ebreak
+
+800005a0 <pass>:
+pass():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/ror.S:82
+800005a0:	00000513          	addi	a0,zero,0
+800005a4:	00100073          	ebreak
+
+Disassembly of section .riscv.attributes:
+
+00000000 <.riscv.attributes>:
+   0:	5641                	.insn	2, 0x5641
+   2:	0000                	.insn	2, 0x0000
+   4:	7200                	.insn	2, 0x7200
+   6:	7369                	.insn	2, 0x7369
+   8:	01007663          	bgeu	zero,a6,14 <__stack_size-0x1ffffec>
+   c:	004c                	.insn	2, 0x004c
+   e:	0000                	.insn	2, 0x0000
+  10:	1004                	.insn	2, 0x1004
+  12:	7205                	.insn	2, 0x7205
+  14:	3376                	.insn	2, 0x3376
+  16:	6932                	.insn	2, 0x6932
+  18:	7032                	.insn	2, 0x7032
+  1a:	5f31                	.insn	2, 0x5f31
+  1c:	326d                	.insn	2, 0x326d
+  1e:	3070                	.insn	2, 0x3070
+  20:	625f 7031 5f30      	.insn	6, 0x5f307031625f
+  26:	697a                	.insn	2, 0x697a
+  28:	6566                	.insn	2, 0x6566
+  2a:	636e                	.insn	2, 0x636e
+  2c:	6965                	.insn	2, 0x6965
+  2e:	7032                	.insn	2, 0x7032
+  30:	5f30                	.insn	2, 0x5f30
+  32:	6d7a                	.insn	2, 0x6d7a
+  34:	756d                	.insn	2, 0x756d
+  36:	316c                	.insn	2, 0x316c
+  38:	3070                	.insn	2, 0x3070
+  3a:	7a5f 6162 7031      	.insn	6, 0x703161627a5f
+  40:	5f30                	.insn	2, 0x5f30
+  42:	627a                	.insn	2, 0x627a
+  44:	3162                	.insn	2, 0x3162
+  46:	3070                	.insn	2, 0x3070
+  48:	7a5f 6362 7031      	.insn	6, 0x703163627a5f
+  4e:	5f30                	.insn	2, 0x5f30
+  50:	627a                	.insn	2, 0x627a
+  52:	30703173          	.insn	4, 0x30703173
+	...
+
+Disassembly of section .debug_line:
+
+00000000 <.debug_line>:
+   0:	0142                	.insn	2, 0x0142
+   2:	0000                	.insn	2, 0x0000
+   4:	0005                	.insn	2, 0x0005
+   6:	0004                	.insn	2, 0x0004
+   8:	002e                	.insn	2, 0x002e
+   a:	0000                	.insn	2, 0x0000
+   c:	0101                	.insn	2, 0x0101
+   e:	fb01                	.insn	2, 0xfb01
+  10:	0d0e                	.insn	2, 0x0d0e
+  12:	0100                	.insn	2, 0x0100
+  14:	0101                	.insn	2, 0x0101
+  16:	0001                	.insn	2, 0x0001
+  18:	0000                	.insn	2, 0x0000
+  1a:	0001                	.insn	2, 0x0001
+  1c:	0100                	.insn	2, 0x0100
+  1e:	0101                	.insn	2, 0x0101
+  20:	021f 0000 0000      	.insn	6, 0x021f
+  26:	0000003b          	.insn	4, 0x003b
+  2a:	0102                	.insn	2, 0x0102
+  2c:	021f 020f 0044      	.insn	6, 0x0044020f021f
+  32:	0000                	.insn	2, 0x0000
+  34:	4401                	.insn	2, 0x4401
+  36:	0000                	.insn	2, 0x0000
+  38:	0100                	.insn	2, 0x0100
+  3a:	0500                	.insn	2, 0x0500
+  3c:	1c02                	.insn	2, 0x1c02
+  3e:	0000                	.insn	2, 0x0000
+  40:	0380                	.insn	2, 0x0380
+  42:	01030113          	addi	sp,t1,16
+  46:	1809                	.insn	2, 0x1809
+  48:	0100                	.insn	2, 0x0100
+  4a:	18090103          	lb	sp,384(s2)
+  4e:	0100                	.insn	2, 0x0100
+  50:	18090103          	lb	sp,384(s2)
+  54:	0100                	.insn	2, 0x0100
+  56:	18090103          	lb	sp,384(s2)
+  5a:	0100                	.insn	2, 0x0100
+  5c:	18090203          	lb	tp,384(s2)
+  60:	0100                	.insn	2, 0x0100
+  62:	18090103          	lb	sp,384(s2)
+  66:	0100                	.insn	2, 0x0100
+  68:	18090103          	lb	sp,384(s2)
+  6c:	0100                	.insn	2, 0x0100
+  6e:	18090103          	lb	sp,384(s2)
+  72:	0100                	.insn	2, 0x0100
+  74:	18090103          	lb	sp,384(s2)
+  78:	0100                	.insn	2, 0x0100
+  7a:	18090203          	lb	tp,384(s2)
+  7e:	0100                	.insn	2, 0x0100
+  80:	20090103          	lb	sp,512(s2)
+  84:	0100                	.insn	2, 0x0100
+  86:	20090103          	lb	sp,512(s2)
+  8a:	0100                	.insn	2, 0x0100
+  8c:	20090103          	lb	sp,512(s2)
+  90:	0100                	.insn	2, 0x0100
+  92:	20090103          	lb	sp,512(s2)
+  96:	0100                	.insn	2, 0x0100
+  98:	20090403          	lb	s0,512(s2)
+  9c:	0100                	.insn	2, 0x0100
+  9e:	20090103          	lb	sp,512(s2)
+  a2:	0100                	.insn	2, 0x0100
+  a4:	20090103          	lb	sp,512(s2)
+  a8:	0100                	.insn	2, 0x0100
+  aa:	20090103          	lb	sp,512(s2)
+  ae:	0100                	.insn	2, 0x0100
+  b0:	20090203          	lb	tp,512(s2)
+  b4:	0100                	.insn	2, 0x0100
+  b6:	20090603          	lb	a2,512(s2)
+  ba:	0100                	.insn	2, 0x0100
+  bc:	18090103          	lb	sp,384(s2)
+  c0:	0100                	.insn	2, 0x0100
+  c2:	18090103          	lb	sp,384(s2)
+  c6:	0100                	.insn	2, 0x0100
+  c8:	14090603          	lb	a2,320(s2)
+  cc:	0100                	.insn	2, 0x0100
+  ce:	2c090103          	lb	sp,704(s2)
+  d2:	0100                	.insn	2, 0x0100
+  d4:	30090103          	lb	sp,768(s2)
+  d8:	0100                	.insn	2, 0x0100
+  da:	34090203          	lb	tp,832(s2)
+  de:	0100                	.insn	2, 0x0100
+  e0:	28090103          	lb	sp,640(s2)
+  e4:	0100                	.insn	2, 0x0100
+  e6:	2c090103          	lb	sp,704(s2)
+  ea:	0100                	.insn	2, 0x0100
+  ec:	30090103          	lb	sp,768(s2)
+  f0:	0100                	.insn	2, 0x0100
+  f2:	2c090103          	lb	sp,704(s2)
+  f6:	0100                	.insn	2, 0x0100
+  f8:	30090103          	lb	sp,768(s2)
+  fc:	0100                	.insn	2, 0x0100
+  fe:	30090203          	lb	tp,768(s2)
+ 102:	0100                	.insn	2, 0x0100
+ 104:	28090103          	lb	sp,640(s2)
+ 108:	0100                	.insn	2, 0x0100
+ 10a:	2c090103          	lb	sp,704(s2)
+ 10e:	0100                	.insn	2, 0x0100
+ 110:	30090103          	lb	sp,768(s2)
+ 114:	0100                	.insn	2, 0x0100
+ 116:	2c090103          	lb	sp,704(s2)
+ 11a:	0100                	.insn	2, 0x0100
+ 11c:	30090103          	lb	sp,768(s2)
+ 120:	0100                	.insn	2, 0x0100
+ 122:	30090203          	lb	tp,768(s2)
+ 126:	0100                	.insn	2, 0x0100
+ 128:	14090103          	lb	sp,320(s2)
+ 12c:	0100                	.insn	2, 0x0100
+ 12e:	14090103          	lb	sp,320(s2)
+ 132:	0100                	.insn	2, 0x0100
+ 134:	10090103          	lb	sp,256(s2)
+ 138:	0100                	.insn	2, 0x0100
+ 13a:	1c090203          	lb	tp,448(s2)
+ 13e:	0100                	.insn	2, 0x0100
+ 140:	1409                	.insn	2, 0x1409
+ 142:	0000                	.insn	2, 0x0000
+ 144:	0101                	.insn	2, 0x0101
+ 146:	005c                	.insn	2, 0x005c
+ 148:	0000                	.insn	2, 0x0000
+ 14a:	0005                	.insn	2, 0x0005
+ 14c:	0004                	.insn	2, 0x0004
+ 14e:	002e                	.insn	2, 0x002e
+ 150:	0000                	.insn	2, 0x0000
+ 152:	0101                	.insn	2, 0x0101
+ 154:	fb01                	.insn	2, 0xfb01
+ 156:	0d0e                	.insn	2, 0x0d0e
+ 158:	0100                	.insn	2, 0x0100
+ 15a:	0101                	.insn	2, 0x0101
+ 15c:	0001                	.insn	2, 0x0001
+ 15e:	0000                	.insn	2, 0x0000
+ 160:	0001                	.insn	2, 0x0001
+ 162:	0100                	.insn	2, 0x0100
+ 164:	0101                	.insn	2, 0x0101
+ 166:	021f 0000 0000      	.insn	6, 0x021f
+ 16c:	004a                	.insn	2, 0x004a
+ 16e:	0000                	.insn	2, 0x0000
+ 170:	0102                	.insn	2, 0x0102
+ 172:	021f 020f 0050      	.insn	6, 0x0050020f021f
+ 178:	0000                	.insn	2, 0x0000
+ 17a:	5001                	.insn	2, 0x5001
+ 17c:	0000                	.insn	2, 0x0000
+ 17e:	0100                	.insn	2, 0x0100
+ 180:	0500                	.insn	2, 0x0500
+ 182:	0002                	.insn	2, 0x0002
+ 184:	0000                	.insn	2, 0x0000
+ 186:	1a80                	.insn	2, 0x1a80
+ 188:	08090103          	lb	sp,128(s2)
+ 18c:	0100                	.insn	2, 0x0100
+ 18e:	08090203          	lb	tp,128(s2)
+ 192:	0100                	.insn	2, 0x0100
+ 194:	04090103          	lb	sp,64(s2)
+ 198:	0100                	.insn	2, 0x0100
+ 19a:	04090303          	lb	t1,64(s2)
+ 19e:	0100                	.insn	2, 0x0100
+ 1a0:	0409                	.insn	2, 0x0409
+ 1a2:	0000                	.insn	2, 0x0000
+ 1a4:	0101                	.insn	2, 0x0101
+
+Disassembly of section .debug_line_str:
+
+00000000 <.debug_line_str>:
+   0:	6d6f682f          	.insn	4, 0x6d6f682f
+   4:	2f65                	.insn	2, 0x2f65
+   6:	7574                	.insn	2, 0x7574
+   8:	7574                	.insn	2, 0x7574
+   a:	7574                	.insn	2, 0x7574
+   c:	6d69712f          	.insn	4, 0x6d69712f
+  10:	6e65                	.insn	2, 0x6e65
+  12:	69732f67          	.insn	4, 0x69732f67
+  16:	706d                	.insn	2, 0x706d
+  18:	746e696f          	jal	s2,e675e <__stack_size-0x1f198a2>
+  1c:	735f 6d69 622f      	.insn	6, 0x622f6d69735f
+  22:	7261                	.insn	2, 0x7261
+  24:	6d65                	.insn	2, 0x6d65
+  26:	7465                	.insn	2, 0x7465
+  28:	6c61                	.insn	2, 0x6c61
+  2a:	7369722f          	.insn	4, 0x7369722f
+  2e:	742d7663          	bgeu	s10,sp,77a <__stack_size-0x1fff886>
+  32:	7365                	.insn	2, 0x7365
+  34:	7374                	.insn	2, 0x7374
+  36:	6173692f          	.insn	4, 0x6173692f
+  3a:	7200                	.insn	2, 0x7200
+  3c:	3376                	.insn	2, 0x3376
+  3e:	7532                	.insn	2, 0x7532
+  40:	627a                	.insn	2, 0x627a
+  42:	0062                	.insn	2, 0x0062
+  44:	6f72                	.insn	2, 0x6f72
+  46:	2e72                	.insn	2, 0x2e72
+  48:	2e2e0053          	.insn	4, 0x2e2e0053
+  4c:	002e2e2f          	.insn	4, 0x002e2e2f
+  50:	72617473          	.insn	4, 0x72617473
+  54:	2e74                	.insn	2, 0x2e74
+  56:	0053                	.short	0x0053
+
+Disassembly of section .debug_info:
+
+00000000 <.debug_info>:
+   0:	0021                	.insn	2, 0x0021
+   2:	0000                	.insn	2, 0x0000
+   4:	0005                	.insn	2, 0x0005
+   6:	0401                	.insn	2, 0x0401
+   8:	0000                	.insn	2, 0x0000
+   a:	0000                	.insn	2, 0x0000
+   c:	0001                	.insn	2, 0x0001
+   e:	0000                	.insn	2, 0x0000
+  10:	1c00                	.insn	2, 0x1c00
+  12:	0000                	.insn	2, 0x0000
+  14:	8c80                	.insn	2, 0x8c80
+  16:	0000000b          	.insn	4, 0x000b
+  1a:	0f00                	.insn	2, 0x0f00
+  1c:	0000                	.insn	2, 0x0000
+  1e:	4a00                	.insn	2, 0x4a00
+  20:	0000                	.insn	2, 0x0000
+  22:	0100                	.insn	2, 0x0100
+  24:	2080                	.insn	2, 0x2080
+  26:	0000                	.insn	2, 0x0000
+  28:	0500                	.insn	2, 0x0500
+  2a:	0100                	.insn	2, 0x0100
+  2c:	1404                	.insn	2, 0x1404
+  2e:	0000                	.insn	2, 0x0000
+  30:	0100                	.insn	2, 0x0100
+  32:	0146                	.insn	2, 0x0146
+  34:	0000                	.insn	2, 0x0000
+  36:	0000                	.insn	2, 0x0000
+  38:	8000                	.insn	2, 0x8000
+  3a:	5620                	.insn	2, 0x5620
+  3c:	0000                	.insn	2, 0x0000
+  3e:	0f00                	.insn	2, 0x0f00
+  40:	0000                	.insn	2, 0x0000
+  42:	4a00                	.insn	2, 0x4a00
+  44:	0000                	.insn	2, 0x0000
+  46:	0100                	.insn	2, 0x0100
+  48:	80                	.byte	0x80
+
+Disassembly of section .debug_abbrev:
+
+00000000 <.debug_abbrev>:
+   0:	1101                	.insn	2, 0x1101
+   2:	1000                	.insn	2, 0x1000
+   4:	12011117          	auipc	sp,0x12011
+   8:	1b0e030f          	.insn	4, 0x1b0e030f
+   c:	250e                	.insn	2, 0x250e
+   e:	130e                	.insn	2, 0x130e
+  10:	0005                	.insn	2, 0x0005
+  12:	0000                	.insn	2, 0x0000
+  14:	1101                	.insn	2, 0x1101
+  16:	1000                	.insn	2, 0x1000
+  18:	12011117          	auipc	sp,0x12011
+  1c:	1b0e030f          	.insn	4, 0x1b0e030f
+  20:	250e                	.insn	2, 0x250e
+  22:	130e                	.insn	2, 0x130e
+  24:	0005                	.insn	2, 0x0005
+	...
+
+Disassembly of section .debug_aranges:
+
+00000000 <.debug_aranges>:
+   0:	001c                	.insn	2, 0x001c
+   2:	0000                	.insn	2, 0x0000
+   4:	0002                	.insn	2, 0x0002
+   6:	0000                	.insn	2, 0x0000
+   8:	0000                	.insn	2, 0x0000
+   a:	0004                	.insn	2, 0x0004
+   c:	0000                	.insn	2, 0x0000
+   e:	0000                	.insn	2, 0x0000
+  10:	001c                	.insn	2, 0x001c
+  12:	8000                	.insn	2, 0x8000
+  14:	058c                	.insn	2, 0x058c
+	...
+  1e:	0000                	.insn	2, 0x0000
+  20:	001c                	.insn	2, 0x001c
+  22:	0000                	.insn	2, 0x0000
+  24:	0002                	.insn	2, 0x0002
+  26:	0025                	.insn	2, 0x0025
+  28:	0000                	.insn	2, 0x0000
+  2a:	0004                	.insn	2, 0x0004
+  2c:	0000                	.insn	2, 0x0000
+  2e:	0000                	.insn	2, 0x0000
+  30:	0000                	.insn	2, 0x0000
+  32:	8000                	.insn	2, 0x8000
+  34:	001c                	.insn	2, 0x001c
+	...
+
+Disassembly of section .debug_str:
+
+00000000 <.debug_str>:
+   0:	7672                	.insn	2, 0x7672
+   2:	7a753233          	.insn	4, 0x7a753233
+   6:	6262                	.insn	2, 0x6262
+   8:	726f722f          	.insn	4, 0x726f722f
+   c:	532e                	.insn	2, 0x532e
+   e:	2f00                	.insn	2, 0x2f00
+  10:	6f68                	.insn	2, 0x6f68
+  12:	656d                	.insn	2, 0x656d
+  14:	7475742f          	.insn	4, 0x7475742f
+  18:	7475                	.insn	2, 0x7475
+  1a:	2f75                	.insn	2, 0x2f75
+  1c:	6971                	.insn	2, 0x6971
+  1e:	656d                	.insn	2, 0x656d
+  20:	676e                	.insn	2, 0x676e
+  22:	6d69732f          	.insn	4, 0x6d69732f
+  26:	6f70                	.insn	2, 0x6f70
+  28:	6e69                	.insn	2, 0x6e69
+  2a:	5f74                	.insn	2, 0x5f74
+  2c:	2f6d6973          	.insn	4, 0x2f6d6973
+  30:	6162                	.insn	2, 0x6162
+  32:	6572                	.insn	2, 0x6572
+  34:	656d                	.insn	2, 0x656d
+  36:	6174                	.insn	2, 0x6174
+  38:	2f6c                	.insn	2, 0x2f6c
+  3a:	6972                	.insn	2, 0x6972
+  3c:	2d766373          	.insn	4, 0x2d766373
+  40:	6574                	.insn	2, 0x6574
+  42:	2f737473          	.insn	4, 0x2f737473
+  46:	7369                	.insn	2, 0x7369
+  48:	0061                	.insn	2, 0x0061
+  4a:	20554e47          	.insn	4, 0x20554e47
+  4e:	5341                	.insn	2, 0x5341
+  50:	3220                	.insn	2, 0x3220
+  52:	342e                	.insn	2, 0x342e
+  54:	0035                	.insn	2, 0x0035
+  56:	2e2e                	.insn	2, 0x2e2e
+  58:	2f2e2e2f          	.insn	4, 0x2f2e2e2f
+  5c:	72617473          	.insn	4, 0x72617473
+  60:	2e74                	.insn	2, 0x2e74
+  62:	0053                	.short	0x0053

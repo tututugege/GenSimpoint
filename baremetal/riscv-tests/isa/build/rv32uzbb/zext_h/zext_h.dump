@@ -1,0 +1,708 @@
+
+build/rv32uzbb/zext_h/zext_h:     file format elf32-littleriscv
+build/rv32uzbb/zext_h/zext_h
+
+
+Disassembly of section .init:
+
+80000000 <_start>:
+_start():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/../../start.S:9
+    .type _start,@function
+
+
+_start:
+
+  la gp, __global_pointer
+80000000:	00001197          	auipc	gp,0x1
+80000004:	aa818193          	addi	gp,gp,-1368 # 80000aa8 <__global_pointer>
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/../../start.S:10
+  la sp, _sp
+80000008:	08000117          	auipc	sp,0x8000
+8000000c:	ff810113          	addi	sp,sp,-8 # 88000000 <_sp>
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/../../start.S:12
+
+  call main
+80000010:	00c000ef          	jal	ra,8000001c <main>
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/../../start.S:13
+  ebreak
+80000014:	00100073          	ebreak
+
+80000018 <loop>:
+loop():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/../../start.S:16
+
+loop:
+    j loop
+80000018:	0000006f          	jal	zero,80000018 <loop>
+
+Disassembly of section .text:
+
+8000001c <main>:
+test_2():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:20
+
+  #-------------------------------------------------------------
+  # Arithmetic tests
+  #-------------------------------------------------------------
+
+  TEST_R_OP( 2,  zext.h, 0x0000000000000000, 0x0000000000000000);
+8000001c:	00200193          	addi	gp,zero,2
+80000020:	00000093          	addi	ra,zero,0
+80000024:	0800c733          	zext.h	a4,ra
+80000028:	00000393          	addi	t2,zero,0
+8000002c:	26771463          	bne	a4,t2,80000294 <fail>
+
+80000030 <test_3>:
+test_3():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:21
+  TEST_R_OP( 3,  zext.h, 0x0000000000000001, 0x0000000000000001);
+80000030:	00300193          	addi	gp,zero,3
+80000034:	00100093          	addi	ra,zero,1
+80000038:	0800c733          	zext.h	a4,ra
+8000003c:	00100393          	addi	t2,zero,1
+80000040:	24771a63          	bne	a4,t2,80000294 <fail>
+
+80000044 <test_4>:
+test_4():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:22
+  TEST_R_OP( 4,  zext.h, 0x0000000000000003, 0x0000000000000003);
+80000044:	00400193          	addi	gp,zero,4
+80000048:	00300093          	addi	ra,zero,3
+8000004c:	0800c733          	zext.h	a4,ra
+80000050:	00300393          	addi	t2,zero,3
+80000054:	24771063          	bne	a4,t2,80000294 <fail>
+
+80000058 <test_5>:
+test_5():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:24
+
+  TEST_R_OP( 5,  zext.h, 0x0000000000008000, 0xffffffffffff8000 );
+80000058:	00500193          	addi	gp,zero,5
+8000005c:	ffff80b7          	lui	ra,0xffff8
+80000060:	0800c733          	zext.h	a4,ra
+80000064:	000083b7          	lui	t2,0x8
+80000068:	22771663          	bne	a4,t2,80000294 <fail>
+
+8000006c <test_6>:
+test_6():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:25
+  TEST_R_OP( 6,  zext.h, 0x0000000000000000, 0x0000000000800000 );
+8000006c:	00600193          	addi	gp,zero,6
+80000070:	008000b7          	lui	ra,0x800
+80000074:	0800c733          	zext.h	a4,ra
+80000078:	00000393          	addi	t2,zero,0
+8000007c:	20771c63          	bne	a4,t2,80000294 <fail>
+
+80000080 <test_7>:
+test_7():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:26
+  TEST_R_OP( 7,  zext.h, 0x0000000000008000, 0x0004ffffffff8000 );
+80000080:	00700193          	addi	gp,zero,7
+80000084:	ffff80b7          	lui	ra,0xffff8
+80000088:	0800c733          	zext.h	a4,ra
+8000008c:	000083b7          	lui	t2,0x8
+80000090:	20771263          	bne	a4,t2,80000294 <fail>
+
+80000094 <test_8>:
+test_8():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:28
+
+  TEST_R_OP( 8,  zext.h, 0x0000000000007fff, 0x0000000000007fff);
+80000094:	00800193          	addi	gp,zero,8
+80000098:	000080b7          	lui	ra,0x8
+8000009c:	fff08093          	addi	ra,ra,-1 # 7fff <__stack_size-0x1ff8001>
+800000a0:	0800c733          	zext.h	a4,ra
+800000a4:	000083b7          	lui	t2,0x8
+800000a8:	fff38393          	addi	t2,t2,-1 # 7fff <__stack_size-0x1ff8001>
+800000ac:	1e771463          	bne	a4,t2,80000294 <fail>
+
+800000b0 <test_9>:
+test_9():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:29
+  TEST_R_OP( 9,  zext.h, 0x000000000000ffff, 0x000000007fffffff);
+800000b0:	00900193          	addi	gp,zero,9
+800000b4:	800000b7          	lui	ra,0x80000
+800000b8:	fff08093          	addi	ra,ra,-1 # 7fffffff <__stack_size+0x7dffffff>
+800000bc:	0800c733          	zext.h	a4,ra
+800000c0:	000103b7          	lui	t2,0x10
+800000c4:	fff38393          	addi	t2,t2,-1 # ffff <__stack_size-0x1ff0001>
+800000c8:	1c771663          	bne	a4,t2,80000294 <fail>
+
+800000cc <test_10>:
+test_10():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:30
+  TEST_R_OP( 10, zext.h, 0x000000000000ffff, 0x000000000007ffff );
+800000cc:	00a00193          	addi	gp,zero,10
+800000d0:	000800b7          	lui	ra,0x80
+800000d4:	fff08093          	addi	ra,ra,-1 # 7ffff <__stack_size-0x1f80001>
+800000d8:	0800c733          	zext.h	a4,ra
+800000dc:	000103b7          	lui	t2,0x10
+800000e0:	fff38393          	addi	t2,t2,-1 # ffff <__stack_size-0x1ff0001>
+800000e4:	1a771863          	bne	a4,t2,80000294 <fail>
+
+800000e8 <test_11>:
+test_11():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:32
+
+  TEST_R_OP( 11, zext.h, 0x0000000000000000, 0xffffffff80000000);
+800000e8:	00b00193          	addi	gp,zero,11
+800000ec:	800000b7          	lui	ra,0x80000
+800000f0:	0800c733          	zext.h	a4,ra
+800000f4:	00000393          	addi	t2,zero,0
+800000f8:	18771e63          	bne	a4,t2,80000294 <fail>
+
+800000fc <test_12>:
+test_12():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:33
+  TEST_R_OP( 12, zext.h, 0x0000000000005000, 0x00ff578f121f5000);
+800000fc:	00c00193          	addi	gp,zero,12
+80000100:	121f50b7          	lui	ra,0x121f5
+80000104:	0800c733          	zext.h	a4,ra
+80000108:	000053b7          	lui	t2,0x5
+8000010c:	18771463          	bne	a4,t2,80000294 <fail>
+
+80000110 <test_13>:
+test_13():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:35
+
+  TEST_R_OP( 13, zext.h, 0x0000000000000000, 0x8000000000000000);
+80000110:	00d00193          	addi	gp,zero,13
+80000114:	000000b7          	lui	ra,0x0
+80000118:	0800c733          	zext.h	a4,ra
+8000011c:	00000393          	addi	t2,zero,0
+80000120:	16771a63          	bne	a4,t2,80000294 <fail>
+
+80000124 <test_14>:
+test_14():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:36
+  TEST_R_OP( 14, zext.h, 0x000000000000000e, 0x000000000000000e);
+80000124:	00e00193          	addi	gp,zero,14
+80000128:	00e00093          	addi	ra,zero,14
+8000012c:	0800c733          	zext.h	a4,ra
+80000130:	00e00393          	addi	t2,zero,14
+80000134:	16771063          	bne	a4,t2,80000294 <fail>
+
+80000138 <test_15>:
+test_15():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:37
+  TEST_R_OP( 15, zext.h, 0x0000000000001341, 0xa000000320401341);
+80000138:	00f00193          	addi	gp,zero,15
+8000013c:	204010b7          	lui	ra,0x20401
+80000140:	34108093          	addi	ra,ra,833 # 20401341 <__stack_size+0x1e401341>
+80000144:	0800c733          	zext.h	a4,ra
+80000148:	000013b7          	lui	t2,0x1
+8000014c:	34138393          	addi	t2,t2,833 # 1341 <__stack_size-0x1ffecbf>
+80000150:	14771263          	bne	a4,t2,80000294 <fail>
+
+80000154 <test_16>:
+test_16():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:43
+
+  #-------------------------------------------------------------
+  # Source/Destination tests
+  #-------------------------------------------------------------
+
+  TEST_R_SRC1_EQ_DEST( 16, zext.h, 0x000000000000000d, 13);
+80000154:	01000193          	addi	gp,zero,16
+80000158:	00d00093          	addi	ra,zero,13
+8000015c:	0800c0b3          	zext.h	ra,ra
+80000160:	00d00393          	addi	t2,zero,13
+80000164:	12709863          	bne	ra,t2,80000294 <fail>
+
+80000168 <test_17>:
+test_17():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:44
+  TEST_R_SRC1_EQ_DEST( 17, zext.h, 0x000000000000000b, 11);
+80000168:	01100193          	addi	gp,zero,17
+8000016c:	00b00093          	addi	ra,zero,11
+80000170:	0800c0b3          	zext.h	ra,ra
+80000174:	00b00393          	addi	t2,zero,11
+80000178:	10709e63          	bne	ra,t2,80000294 <fail>
+
+8000017c <test_18>:
+test_18():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:50
+
+  #-------------------------------------------------------------
+  # Bypassing tests
+  #-------------------------------------------------------------
+
+  TEST_R_DEST_BYPASS( 18, 0, zext.h, 0x000000000000000d, 13);
+8000017c:	01200193          	addi	gp,zero,18
+80000180:	00000213          	addi	tp,zero,0
+80000184:	00d00093          	addi	ra,zero,13
+80000188:	0800c733          	zext.h	a4,ra
+8000018c:	00070313          	addi	t1,a4,0
+80000190:	00120213          	addi	tp,tp,1 # 1 <__stack_size-0x1ffffff>
+80000194:	00200293          	addi	t0,zero,2
+80000198:	fe5216e3          	bne	tp,t0,80000184 <test_18+0x8>
+8000019c:	00d00393          	addi	t2,zero,13
+800001a0:	0e731a63          	bne	t1,t2,80000294 <fail>
+
+800001a4 <test_29>:
+test_29():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:51
+  TEST_R_DEST_BYPASS( 29, 1, zext.h, 0x0000000000000013, 19);
+800001a4:	01d00193          	addi	gp,zero,29
+800001a8:	00000213          	addi	tp,zero,0
+800001ac:	01300093          	addi	ra,zero,19
+800001b0:	0800c733          	zext.h	a4,ra
+800001b4:	00000013          	addi	zero,zero,0
+800001b8:	00070313          	addi	t1,a4,0
+800001bc:	00120213          	addi	tp,tp,1 # 1 <__stack_size-0x1ffffff>
+800001c0:	00200293          	addi	t0,zero,2
+800001c4:	fe5214e3          	bne	tp,t0,800001ac <test_29+0x8>
+800001c8:	01300393          	addi	t2,zero,19
+800001cc:	0c731463          	bne	t1,t2,80000294 <fail>
+
+800001d0 <test_20>:
+test_20():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:52
+  TEST_R_DEST_BYPASS( 20, 2, zext.h, 0x0000000000000022, 34);
+800001d0:	01400193          	addi	gp,zero,20
+800001d4:	00000213          	addi	tp,zero,0
+800001d8:	02200093          	addi	ra,zero,34
+800001dc:	0800c733          	zext.h	a4,ra
+800001e0:	00000013          	addi	zero,zero,0
+800001e4:	00000013          	addi	zero,zero,0
+800001e8:	00070313          	addi	t1,a4,0
+800001ec:	00120213          	addi	tp,tp,1 # 1 <__stack_size-0x1ffffff>
+800001f0:	00200293          	addi	t0,zero,2
+800001f4:	fe5212e3          	bne	tp,t0,800001d8 <test_20+0x8>
+800001f8:	02200393          	addi	t2,zero,34
+800001fc:	08731c63          	bne	t1,t2,80000294 <fail>
+
+80000200 <test_21>:
+test_21():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:58
+
+  #-------------------------------------------------------------
+  # Other tests
+  #-------------------------------------------------------------
+
+  TEST_R_OP( 21,  zext.h, 0x0000000000008000, 0x00000000007f8000 );
+80000200:	01500193          	addi	gp,zero,21
+80000204:	007f80b7          	lui	ra,0x7f8
+80000208:	0800c733          	zext.h	a4,ra
+8000020c:	000083b7          	lui	t2,0x8
+80000210:	08771263          	bne	a4,t2,80000294 <fail>
+
+80000214 <test_22>:
+test_22():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:59
+  TEST_R_OP( 22,  zext.h, 0x0000000000008000, 0x0000000000808000 );
+80000214:	01600193          	addi	gp,zero,22
+80000218:	008080b7          	lui	ra,0x808
+8000021c:	0800c733          	zext.h	a4,ra
+80000220:	000083b7          	lui	t2,0x8
+80000224:	06771863          	bne	a4,t2,80000294 <fail>
+
+80000228 <test_23>:
+test_23():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:60
+  TEST_R_OP( 23,  zext.h, 0x0000000000008000, 0x0000000001808000 );
+80000228:	01700193          	addi	gp,zero,23
+8000022c:	018080b7          	lui	ra,0x1808
+80000230:	0800c733          	zext.h	a4,ra
+80000234:	000083b7          	lui	t2,0x8
+80000238:	04771e63          	bne	a4,t2,80000294 <fail>
+
+8000023c <test_24>:
+test_24():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:62
+
+  TEST_R_OP( 24,  zext.h, 0x0000000000007fff, 0x0000000300007fff);
+8000023c:	01800193          	addi	gp,zero,24
+80000240:	000080b7          	lui	ra,0x8
+80000244:	fff08093          	addi	ra,ra,-1 # 7fff <__stack_size-0x1ff8001>
+80000248:	0800c733          	zext.h	a4,ra
+8000024c:	000083b7          	lui	t2,0x8
+80000250:	fff38393          	addi	t2,t2,-1 # 7fff <__stack_size-0x1ff8001>
+80000254:	04771063          	bne	a4,t2,80000294 <fail>
+
+80000258 <test_25>:
+test_25():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:63
+  TEST_R_OP( 25,  zext.h, 0x000000000000ffff, 0x000000077fffffff);
+80000258:	01900193          	addi	gp,zero,25
+8000025c:	800000b7          	lui	ra,0x80000
+80000260:	fff08093          	addi	ra,ra,-1 # 7fffffff <__stack_size+0x7dffffff>
+80000264:	0800c733          	zext.h	a4,ra
+80000268:	000103b7          	lui	t2,0x10
+8000026c:	fff38393          	addi	t2,t2,-1 # ffff <__stack_size-0x1ff0001>
+80000270:	02771263          	bne	a4,t2,80000294 <fail>
+
+80000274 <test_26>:
+test_26():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:64
+  TEST_R_OP( 26,  zext.h, 0x000000000000ffff, 0x0000000f0007ffff);
+80000274:	01a00193          	addi	gp,zero,26
+80000278:	000800b7          	lui	ra,0x80
+8000027c:	fff08093          	addi	ra,ra,-1 # 7ffff <__stack_size-0x1f80001>
+80000280:	0800c733          	zext.h	a4,ra
+80000284:	000103b7          	lui	t2,0x10
+80000288:	fff38393          	addi	t2,t2,-1 # ffff <__stack_size-0x1ff0001>
+8000028c:	00771463          	bne	a4,t2,80000294 <fail>
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:66
+
+  TEST_PASSFAIL
+80000290:	00301663          	bne	zero,gp,8000029c <pass>
+
+80000294 <fail>:
+fail():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:66
+80000294:	00100513          	addi	a0,zero,1
+80000298:	00100073          	ebreak
+
+8000029c <pass>:
+pass():
+/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa/rv32uzbb/../rv64uzbb/zext_h.S:66
+8000029c:	00000513          	addi	a0,zero,0
+800002a0:	00100073          	ebreak
+
+Disassembly of section .riscv.attributes:
+
+00000000 <.riscv.attributes>:
+   0:	5641                	.insn	2, 0x5641
+   2:	0000                	.insn	2, 0x0000
+   4:	7200                	.insn	2, 0x7200
+   6:	7369                	.insn	2, 0x7369
+   8:	01007663          	bgeu	zero,a6,14 <__stack_size-0x1ffffec>
+   c:	004c                	.insn	2, 0x004c
+   e:	0000                	.insn	2, 0x0000
+  10:	1004                	.insn	2, 0x1004
+  12:	7205                	.insn	2, 0x7205
+  14:	3376                	.insn	2, 0x3376
+  16:	6932                	.insn	2, 0x6932
+  18:	7032                	.insn	2, 0x7032
+  1a:	5f31                	.insn	2, 0x5f31
+  1c:	326d                	.insn	2, 0x326d
+  1e:	3070                	.insn	2, 0x3070
+  20:	625f 7031 5f30      	.insn	6, 0x5f307031625f
+  26:	697a                	.insn	2, 0x697a
+  28:	6566                	.insn	2, 0x6566
+  2a:	636e                	.insn	2, 0x636e
+  2c:	6965                	.insn	2, 0x6965
+  2e:	7032                	.insn	2, 0x7032
+  30:	5f30                	.insn	2, 0x5f30
+  32:	6d7a                	.insn	2, 0x6d7a
+  34:	756d                	.insn	2, 0x756d
+  36:	316c                	.insn	2, 0x316c
+  38:	3070                	.insn	2, 0x3070
+  3a:	7a5f 6162 7031      	.insn	6, 0x703161627a5f
+  40:	5f30                	.insn	2, 0x5f30
+  42:	627a                	.insn	2, 0x627a
+  44:	3162                	.insn	2, 0x3162
+  46:	3070                	.insn	2, 0x3070
+  48:	7a5f 6362 7031      	.insn	6, 0x703163627a5f
+  4e:	5f30                	.insn	2, 0x5f30
+  50:	627a                	.insn	2, 0x627a
+  52:	30703173          	.insn	4, 0x30703173
+	...
+
+Disassembly of section .debug_line:
+
+00000000 <.debug_line>:
+   0:	005c                	.insn	2, 0x005c
+   2:	0000                	.insn	2, 0x0000
+   4:	0005                	.insn	2, 0x0005
+   6:	0004                	.insn	2, 0x0004
+   8:	002e                	.insn	2, 0x002e
+   a:	0000                	.insn	2, 0x0000
+   c:	0101                	.insn	2, 0x0101
+   e:	fb01                	.insn	2, 0xfb01
+  10:	0d0e                	.insn	2, 0x0d0e
+  12:	0100                	.insn	2, 0x0100
+  14:	0101                	.insn	2, 0x0101
+  16:	0001                	.insn	2, 0x0001
+  18:	0000                	.insn	2, 0x0000
+  1a:	0001                	.insn	2, 0x0001
+  1c:	0100                	.insn	2, 0x0100
+  1e:	0101                	.insn	2, 0x0101
+  20:	021f 0000 0000      	.insn	6, 0x021f
+  26:	0000003b          	.insn	4, 0x003b
+  2a:	0102                	.insn	2, 0x0102
+  2c:	021f 020f 0041      	.insn	6, 0x0041020f021f
+  32:	0000                	.insn	2, 0x0000
+  34:	4101                	.insn	2, 0x4101
+  36:	0000                	.insn	2, 0x0000
+  38:	0100                	.insn	2, 0x0100
+  3a:	0500                	.insn	2, 0x0500
+  3c:	0002                	.insn	2, 0x0002
+  3e:	0000                	.insn	2, 0x0000
+  40:	1a80                	.insn	2, 0x1a80
+  42:	08090103          	lb	sp,128(s2)
+  46:	0100                	.insn	2, 0x0100
+  48:	08090203          	lb	tp,128(s2)
+  4c:	0100                	.insn	2, 0x0100
+  4e:	04090103          	lb	sp,64(s2)
+  52:	0100                	.insn	2, 0x0100
+  54:	04090303          	lb	t1,64(s2)
+  58:	0100                	.insn	2, 0x0100
+  5a:	0409                	.insn	2, 0x0409
+  5c:	0000                	.insn	2, 0x0000
+  5e:	0101                	.insn	2, 0x0101
+  60:	00dc                	.insn	2, 0x00dc
+  62:	0000                	.insn	2, 0x0000
+  64:	0005                	.insn	2, 0x0005
+  66:	0004                	.insn	2, 0x0004
+  68:	002e                	.insn	2, 0x002e
+  6a:	0000                	.insn	2, 0x0000
+  6c:	0101                	.insn	2, 0x0101
+  6e:	fb01                	.insn	2, 0xfb01
+  70:	0d0e                	.insn	2, 0x0d0e
+  72:	0100                	.insn	2, 0x0100
+  74:	0101                	.insn	2, 0x0101
+  76:	0001                	.insn	2, 0x0001
+  78:	0000                	.insn	2, 0x0000
+  7a:	0001                	.insn	2, 0x0001
+  7c:	0100                	.insn	2, 0x0100
+  7e:	0101                	.insn	2, 0x0101
+  80:	021f 0000 0000      	.insn	6, 0x021f
+  86:	0049                	.insn	2, 0x0049
+  88:	0000                	.insn	2, 0x0000
+  8a:	0102                	.insn	2, 0x0102
+  8c:	021f 020f 005e      	.insn	6, 0x005e020f021f
+  92:	0000                	.insn	2, 0x0000
+  94:	5e01                	.insn	2, 0x5e01
+  96:	0000                	.insn	2, 0x0000
+  98:	0100                	.insn	2, 0x0100
+  9a:	0500                	.insn	2, 0x0500
+  9c:	1c02                	.insn	2, 0x1c02
+  9e:	0000                	.insn	2, 0x0000
+  a0:	0380                	.insn	2, 0x0380
+  a2:	01030113          	addi	sp,t1,16
+  a6:	1409                	.insn	2, 0x1409
+  a8:	0100                	.insn	2, 0x0100
+  aa:	14090103          	lb	sp,320(s2)
+  ae:	0100                	.insn	2, 0x0100
+  b0:	14090203          	lb	tp,320(s2)
+  b4:	0100                	.insn	2, 0x0100
+  b6:	14090103          	lb	sp,320(s2)
+  ba:	0100                	.insn	2, 0x0100
+  bc:	14090103          	lb	sp,320(s2)
+  c0:	0100                	.insn	2, 0x0100
+  c2:	14090203          	lb	tp,320(s2)
+  c6:	0100                	.insn	2, 0x0100
+  c8:	1c090103          	lb	sp,448(s2)
+  cc:	0100                	.insn	2, 0x0100
+  ce:	1c090103          	lb	sp,448(s2)
+  d2:	0100                	.insn	2, 0x0100
+  d4:	1c090203          	lb	tp,448(s2)
+  d8:	0100                	.insn	2, 0x0100
+  da:	14090103          	lb	sp,320(s2)
+  de:	0100                	.insn	2, 0x0100
+  e0:	14090203          	lb	tp,320(s2)
+  e4:	0100                	.insn	2, 0x0100
+  e6:	14090103          	lb	sp,320(s2)
+  ea:	0100                	.insn	2, 0x0100
+  ec:	14090103          	lb	sp,320(s2)
+  f0:	0100                	.insn	2, 0x0100
+  f2:	1c090603          	lb	a2,448(s2)
+  f6:	0100                	.insn	2, 0x0100
+  f8:	14090103          	lb	sp,320(s2)
+  fc:	0100                	.insn	2, 0x0100
+  fe:	14090603          	lb	a2,320(s2)
+ 102:	0100                	.insn	2, 0x0100
+ 104:	28090103          	lb	sp,640(s2)
+ 108:	0100                	.insn	2, 0x0100
+ 10a:	2c090103          	lb	sp,704(s2)
+ 10e:	0100                	.insn	2, 0x0100
+ 110:	30090603          	lb	a2,768(s2)
+ 114:	0100                	.insn	2, 0x0100
+ 116:	14090103          	lb	sp,320(s2)
+ 11a:	0100                	.insn	2, 0x0100
+ 11c:	14090103          	lb	sp,320(s2)
+ 120:	0100                	.insn	2, 0x0100
+ 122:	14090203          	lb	tp,320(s2)
+ 126:	0100                	.insn	2, 0x0100
+ 128:	1c090103          	lb	sp,448(s2)
+ 12c:	0100                	.insn	2, 0x0100
+ 12e:	1c090103          	lb	sp,448(s2)
+ 132:	0100                	.insn	2, 0x0100
+ 134:	1c090203          	lb	tp,448(s2)
+ 138:	0100                	.insn	2, 0x0100
+ 13a:	1409                	.insn	2, 0x1409
+ 13c:	0000                	.insn	2, 0x0000
+ 13e:	0101                	.insn	2, 0x0101
+
+Disassembly of section .debug_line_str:
+
+00000000 <.debug_line_str>:
+   0:	6d6f682f          	.insn	4, 0x6d6f682f
+   4:	2f65                	.insn	2, 0x2f65
+   6:	7574                	.insn	2, 0x7574
+   8:	7574                	.insn	2, 0x7574
+   a:	7574                	.insn	2, 0x7574
+   c:	6d69712f          	.insn	4, 0x6d69712f
+  10:	6e65                	.insn	2, 0x6e65
+  12:	69732f67          	.insn	4, 0x69732f67
+  16:	706d                	.insn	2, 0x706d
+  18:	746e696f          	jal	s2,e675e <__stack_size-0x1f198a2>
+  1c:	735f 6d69 622f      	.insn	6, 0x622f6d69735f
+  22:	7261                	.insn	2, 0x7261
+  24:	6d65                	.insn	2, 0x6d65
+  26:	7465                	.insn	2, 0x7465
+  28:	6c61                	.insn	2, 0x6c61
+  2a:	7369722f          	.insn	4, 0x7369722f
+  2e:	742d7663          	bgeu	s10,sp,77a <__stack_size-0x1fff886>
+  32:	7365                	.insn	2, 0x7365
+  34:	7374                	.insn	2, 0x7374
+  36:	6173692f          	.insn	4, 0x6173692f
+  3a:	2e00                	.insn	2, 0x2e00
+  3c:	2f2e                	.insn	2, 0x2f2e
+  3e:	2e2e                	.insn	2, 0x2e2e
+  40:	7300                	.insn	2, 0x7300
+  42:	6174                	.insn	2, 0x6174
+  44:	7472                	.insn	2, 0x7472
+  46:	532e                	.insn	2, 0x532e
+  48:	7200                	.insn	2, 0x7200
+  4a:	3376                	.insn	2, 0x3376
+  4c:	7532                	.insn	2, 0x7532
+  4e:	627a                	.insn	2, 0x627a
+  50:	2f62                	.insn	2, 0x2f62
+  52:	2e2e                	.insn	2, 0x2e2e
+  54:	3676722f          	.insn	4, 0x3676722f
+  58:	7534                	.insn	2, 0x7534
+  5a:	627a                	.insn	2, 0x627a
+  5c:	0062                	.insn	2, 0x0062
+  5e:	657a                	.insn	2, 0x657a
+  60:	7478                	.insn	2, 0x7478
+  62:	00532e685f 	.5byte	0x00532e685f
+
+Disassembly of section .debug_info:
+
+00000000 <.debug_info>:
+   0:	0020                	.insn	2, 0x0020
+   2:	0000                	.insn	2, 0x0000
+   4:	0005                	.insn	2, 0x0005
+   6:	0401                	.insn	2, 0x0401
+   8:	0000                	.insn	2, 0x0000
+   a:	0000                	.insn	2, 0x0000
+   c:	0001                	.insn	2, 0x0001
+   e:	0000                	.insn	2, 0x0000
+  10:	0000                	.insn	2, 0x0000
+  12:	0000                	.insn	2, 0x0000
+  14:	2080                	.insn	2, 0x2080
+  16:	0000                	.insn	2, 0x0000
+  18:	0000                	.insn	2, 0x0000
+  1a:	000e                	.insn	2, 0x000e
+  1c:	0000                	.insn	2, 0x0000
+  1e:	0049                	.insn	2, 0x0049
+  20:	0000                	.insn	2, 0x0000
+  22:	8001                	.insn	2, 0x8001
+  24:	0021                	.insn	2, 0x0021
+  26:	0000                	.insn	2, 0x0000
+  28:	0005                	.insn	2, 0x0005
+  2a:	0401                	.insn	2, 0x0401
+  2c:	0014                	.insn	2, 0x0014
+  2e:	0000                	.insn	2, 0x0000
+  30:	6001                	.insn	2, 0x6001
+  32:	0000                	.insn	2, 0x0000
+  34:	1c00                	.insn	2, 0x1c00
+  36:	0000                	.insn	2, 0x0000
+  38:	8880                	.insn	2, 0x8880
+  3a:	5505                	.insn	2, 0x5505
+  3c:	0000                	.insn	2, 0x0000
+  3e:	0e00                	.insn	2, 0x0e00
+  40:	0000                	.insn	2, 0x0000
+  42:	4900                	.insn	2, 0x4900
+  44:	0000                	.insn	2, 0x0000
+  46:	0100                	.insn	2, 0x0100
+  48:	80                	.byte	0x80
+
+Disassembly of section .debug_abbrev:
+
+00000000 <.debug_abbrev>:
+   0:	1101                	.insn	2, 0x1101
+   2:	1000                	.insn	2, 0x1000
+   4:	12011117          	auipc	sp,0x12011
+   8:	1b0e030f          	.insn	4, 0x1b0e030f
+   c:	250e                	.insn	2, 0x250e
+   e:	130e                	.insn	2, 0x130e
+  10:	0005                	.insn	2, 0x0005
+  12:	0000                	.insn	2, 0x0000
+  14:	1101                	.insn	2, 0x1101
+  16:	1000                	.insn	2, 0x1000
+  18:	12011117          	auipc	sp,0x12011
+  1c:	1b0e030f          	.insn	4, 0x1b0e030f
+  20:	250e                	.insn	2, 0x250e
+  22:	130e                	.insn	2, 0x130e
+  24:	0005                	.insn	2, 0x0005
+	...
+
+Disassembly of section .debug_aranges:
+
+00000000 <.debug_aranges>:
+   0:	001c                	.insn	2, 0x001c
+   2:	0000                	.insn	2, 0x0000
+   4:	0002                	.insn	2, 0x0002
+   6:	0000                	.insn	2, 0x0000
+   8:	0000                	.insn	2, 0x0000
+   a:	0004                	.insn	2, 0x0004
+   c:	0000                	.insn	2, 0x0000
+   e:	0000                	.insn	2, 0x0000
+  10:	0000                	.insn	2, 0x0000
+  12:	8000                	.insn	2, 0x8000
+  14:	001c                	.insn	2, 0x001c
+	...
+  1e:	0000                	.insn	2, 0x0000
+  20:	001c                	.insn	2, 0x001c
+  22:	0000                	.insn	2, 0x0000
+  24:	0002                	.insn	2, 0x0002
+  26:	0024                	.insn	2, 0x0024
+  28:	0000                	.insn	2, 0x0000
+  2a:	0004                	.insn	2, 0x0004
+  2c:	0000                	.insn	2, 0x0000
+  2e:	0000                	.insn	2, 0x0000
+  30:	001c                	.insn	2, 0x001c
+  32:	8000                	.insn	2, 0x8000
+  34:	0288                	.insn	2, 0x0288
+	...
+
+Disassembly of section .debug_str:
+
+00000000 <.debug_str>:
+   0:	2e2e                	.insn	2, 0x2e2e
+   2:	2f2e2e2f          	.insn	4, 0x2f2e2e2f
+   6:	72617473          	.insn	4, 0x72617473
+   a:	2e74                	.insn	2, 0x2e74
+   c:	682f0053          	.insn	4, 0x682f0053
+  10:	2f656d6f          	jal	s10,56306 <__stack_size-0x1fa9cfa>
+  14:	7574                	.insn	2, 0x7574
+  16:	7574                	.insn	2, 0x7574
+  18:	7574                	.insn	2, 0x7574
+  1a:	6d69712f          	.insn	4, 0x6d69712f
+  1e:	6e65                	.insn	2, 0x6e65
+  20:	69732f67          	.insn	4, 0x69732f67
+  24:	706d                	.insn	2, 0x706d
+  26:	746e696f          	jal	s2,e676c <__stack_size-0x1f19894>
+  2a:	735f 6d69 622f      	.insn	6, 0x622f6d69735f
+  30:	7261                	.insn	2, 0x7261
+  32:	6d65                	.insn	2, 0x6d65
+  34:	7465                	.insn	2, 0x7465
+  36:	6c61                	.insn	2, 0x6c61
+  38:	7369722f          	.insn	4, 0x7369722f
+  3c:	742d7663          	bgeu	s10,sp,788 <__stack_size-0x1fff878>
+  40:	7365                	.insn	2, 0x7365
+  42:	7374                	.insn	2, 0x7374
+  44:	6173692f          	.insn	4, 0x6173692f
+  48:	4700                	.insn	2, 0x4700
+  4a:	554e                	.insn	2, 0x554e
+  4c:	4120                	.insn	2, 0x4120
+  4e:	2e322053          	.insn	4, 0x2e322053
+  52:	3534                	.insn	2, 0x3534
+  54:	7200                	.insn	2, 0x7200
+  56:	3376                	.insn	2, 0x3376
+  58:	7532                	.insn	2, 0x7532
+  5a:	627a                	.insn	2, 0x627a
+  5c:	2f62                	.insn	2, 0x2f62
+  5e:	2e2e                	.insn	2, 0x2e2e
+  60:	3676722f          	.insn	4, 0x3676722f
+  64:	7534                	.insn	2, 0x7534
+  66:	627a                	.insn	2, 0x627a
+  68:	2f62                	.insn	2, 0x2f62
+  6a:	657a                	.insn	2, 0x657a
+  6c:	7478                	.insn	2, 0x7478
+  6e:	00532e685f 	.5byte	0x00532e685f

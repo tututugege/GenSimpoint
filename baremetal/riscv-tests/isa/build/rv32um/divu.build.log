@@ -1,0 +1,19 @@
+make[1]: Entering directory '/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa'
+/opt/riscv32/bin/riscv32-unknown-elf-gcc -O0  -march=rv32ima_zifencei -mabi=ilp32 -mcmodel=medlow  -O2 --specs=nosys.specs  -gdwarf -I. -Imacros/scalar -c -o build/rv32um/divu/divu.o rv32um/divu.S
+In file included from rv32um/divu.S:11:
+macros/scalar/test_macros.h:818:9: warning: 'TEST_PASSFAIL' redefined
+  818 | #define TEST_PASSFAIL \
+      |         ^~~~~~~~~~~~~
+In file included from rv32um/divu.S:10:
+./riscv_test.h:28:9: note: this is the location of the previous definition
+   28 | #define TEST_PASSFAIL                                                   \
+      |         ^~~~~~~~~~~~~
+/opt/riscv32/bin/riscv32-unknown-elf-gcc -O0  -march=rv32ima_zifencei -mabi=ilp32 -mcmodel=medlow  -O2 --specs=nosys.specs  -gdwarf -I. -Imacros/scalar -c -o build/rv32um/divu/start.o ../../start.S
+/opt/riscv32/bin/riscv32-unknown-elf-gcc -O0  -march=rv32ima_zifencei -mabi=ilp32 -mcmodel=medlow  -O2 --specs=nosys.specs  -gdwarf -I. -Imacros/scalar -c -o build/rv32um/divu/uart.o ../../lib/uart.c
+/opt/riscv32/bin/riscv32-unknown-elf-gcc -O0  -march=rv32ima_zifencei -mabi=ilp32 -mcmodel=medlow  -O2 --specs=nosys.specs  -gdwarf -I. -Imacros/scalar -c -o build/rv32um/divu/utils.o ../../lib/utils.c
+/opt/riscv32/bin/riscv32-unknown-elf-gcc -O0  -march=rv32ima_zifencei -mabi=ilp32 -mcmodel=medlow  -O2 --specs=nosys.specs  -gdwarf -I. -Imacros/scalar -c -o build/rv32um/divu/xprintf.o ../../lib/xprintf.c
+/opt/riscv32/bin/riscv32-unknown-elf-gcc -O0  -march=rv32ima_zifencei -mabi=ilp32 -mcmodel=medlow  -O2 --specs=nosys.specs  -gdwarf -I. -Imacros/scalar build/rv32um/divu/divu.o build/rv32um/divu/start.o build/rv32um/divu/uart.o build/rv32um/divu/utils.o build/rv32um/divu/xprintf.o -o build/rv32um/divu/divu -T ../../link.lds -nostartfiles -Wl,--gc-sections -Wl,--check-sections
+/opt/riscv32/lib/gcc/riscv32-unknown-elf/15.1.0/../../../../riscv32-unknown-elf/bin/ld: warning: build/rv32um/divu/divu has a LOAD segment with RWX permissions
+/opt/riscv32/bin/riscv32-unknown-elf-objcopy -O binary build/rv32um/divu/divu build/rv32um/divu/divu.bin
+/opt/riscv32/bin/riscv32-unknown-elf-objdump -alDS -M no-aliases build/rv32um/divu/divu > build/rv32um/divu/divu.dump
+make[1]: Leaving directory '/home/tututu/qimeng/simpoint_sim/baremetal/riscv-tests/isa'
