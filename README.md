@@ -51,6 +51,74 @@ make -j$(nproc)
 
 ---
 
+## 🧭 地址空间布局（当前实现）
+
+当前实现采用“**1GB 连续 RAM + 离散 IO word 存储**”的方式：
+
+### 1. RAM（连续分配）
+- 物理地址窗口：`0x80000000 - 0xBFFFFFFF`（1GB）
+- 仅该范围使用连续数组分配，用于镜像加载和正常内存访问
+- 超出 `0xBFFFFFFF` 会触发越界错误并退出
+
+### 2. IO / Boot（离散存储）
+- `0x00000000` 附近：启动 stub（启动阶段写入）
+- `0x00001000` 附近：Boot ROM stub（启动阶段写入）
+- `0x10000000`：UART 基址（写入会输出字符）
+- `0x10000004`：OpenSBI 兼容寄存器（初始化写 `0x00006000`）
+- `0x0c000000`：PLIC 基址
+- `0x0c201004`：PLIC 中断相关寄存器（UART/PLIC 联动逻辑会访问）
+- `0x1fd0e000`：Timer 寄存器（读取返回 `sim_time`）
+- `0x1fd0e004`：Timer 高位寄存器（当前返回 0）
+
+说明：
+- 低地址和外设地址不再占用连续大内存，而是按 `word_addr -> word_data` 离散存储。
+- 读未初始化的离散 IO word 默认返回 `0`。
+
+---
+
+## 💾 Checkpoint 格式（当前实现）
+
+Checkpoint 使用 `zlib gzip`（写模式 `wb1`，文件后缀通常为 `.gz`），按如下顺序写入：
+
+1. `CPU_state`（POD 原样二进制）
+2. `interval_inst_count`（`uint64_t`）
+3. `RAM` 原始字节流（固定 `ram_size` 字节，当前为 1GB）
+4. `io_count`（`uint32_t`，离散 IO word 数）
+5. `io_entries`（重复 `io_count` 次，每次两个 `uint32_t`：`addr`, `data`）
+
+其中：
+- `CPU_state` 定义在 `include/ref.h`，包含 GPR/CSR/PC 以及 store/reserve 相关字段。
+- RAM 按字节连续写入；内部按最多 1GB 分块进行 `gzwrite/gzread`。
+
+### 兼容性
+- 新版本恢复时兼容旧 checkpoint：
+  只有前 3 部分（无 `io_count/io_entries`）也可恢复；此时 IO 表保持初始化默认值。
+
+---
+
+## 🔄 如何读取与恢复
+
+### 1. 使用模拟器直接恢复（推荐）
+```bash
+./a.out --image linux.bin --mode restore --restore-file path/to/ckpt.gz --max-insts 100000000
+```
+
+恢复流程：
+1. 先通过 `init()` 分配 1GB RAM，并完成默认 Boot/IO 初始化
+2. `restore_checkpoint()` 覆盖 `CPU_state` 和 `interval_inst_count`
+3. 覆盖整个 1GB RAM 内容
+4. 若文件中包含 IO 表，则覆盖离散 IO；否则保持初始化 IO 状态
+
+### 2. 离线解析 checkpoint（二次开发）
+若需要自己读取文件，按“Checkpoint 格式”中的顺序使用 `gzread` 逐段解析即可。关键点：
+- 必须使用与当前程序一致的 `CPU_state` 结构体布局（同编译器/ABI 假设）
+- RAM 字节数必须与运行配置一致（当前固定 1GB）
+- 解析完 RAM 后，尝试读取 `io_count`：
+  - 读到 4 字节：继续读取 IO entries
+  - 读到 0 字节（EOF）：视为旧格式文件
+
+---
+
 ## 🏗️ 核心函数接口说明
 
 ### 1. `Ref_cpu` (主模拟器类)

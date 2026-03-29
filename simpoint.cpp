@@ -62,7 +62,7 @@ void Ref_cpu::dump_bbv() {
   // 遍历 vector，只要非零的都输出
   for (size_t id = 1; id < bbv_counts.size(); ++id) {
     if (bbv_counts[id] > 0) {
-      bbv_file << ":" << id << ":" << bbv_counts[id];
+      bbv_file << " :" << id << ":" << bbv_counts[id];
       bbv_counts[id] = 0; // 输出完清零，为下一轮做准备
     }
   }
@@ -96,14 +96,12 @@ void Ref_cpu::save_checkpoint(const std::string &filename) {
 
   // 2. 保存内存 (关键修改)
   if (ram_size > 0 && memory != nullptr) {
-    // [关键] ram_size 是 word 个数，需转换为字节数
-    // 必须强转为 uint64_t 防止乘法溢出
-    uint64_t total_bytes = (uint64_t)ram_size * sizeof(uint32_t);
+    uint64_t total_bytes = ram_size;
 
     uint8_t *byte_ptr = reinterpret_cast<uint8_t *>(memory);
     uint64_t remain = total_bytes;
 
-    std::cout << "Saving Memory: " << ram_size << " words ("
+    std::cout << "Saving Memory: " << (ram_size / sizeof(uint32_t)) << " words ("
               << (total_bytes / 1024 / 1024) << " MB)..." << std::endl;
 
     while (remain > 0) {
@@ -121,6 +119,14 @@ void Ref_cpu::save_checkpoint(const std::string &filename) {
       byte_ptr += chunk; // 指针按字节移动
       remain -= chunk;
     }
+  }
+
+  // 3. 保存离散 I/O 空间
+  uint32_t io_count = static_cast<uint32_t>(io_words.size());
+  gz_write_pod(file, io_count);
+  for (const auto &kv : io_words) {
+    gz_write_pod(file, kv.first);
+    gz_write_pod(file, kv.second);
   }
 
   gzclose(file);
@@ -150,8 +156,7 @@ void Ref_cpu::restore_checkpoint(const std::string &filename) {
     exit(1);
   }
 
-  // [关键] 计算总字节数
-  uint64_t total_bytes = (uint64_t)ram_size * sizeof(uint32_t);
+  uint64_t total_bytes = ram_size;
   uint8_t *byte_ptr = reinterpret_cast<uint8_t *>(memory);
   uint64_t remain = total_bytes;
 
@@ -173,6 +178,23 @@ void Ref_cpu::restore_checkpoint(const std::string &filename) {
 
     byte_ptr += read_bytes;
     remain -= read_bytes;
+  }
+
+  // 3. 恢复离散 I/O 空间 (兼容旧 checkpoint：读不到则保持 init 默认值)
+  io_words.clear();
+  uint32_t io_count = 0;
+  int io_count_bytes = gzread(file, &io_count, sizeof(io_count));
+  if (io_count_bytes == (int)sizeof(io_count)) {
+    for (uint32_t i = 0; i < io_count; ++i) {
+      uint32_t addr = 0;
+      uint32_t data = 0;
+      gz_read_pod(file, addr);
+      gz_read_pod(file, data);
+      io_words[addr] = data;
+    }
+  } else if (io_count_bytes != 0) {
+    std::cerr << "Error: Corrupted checkpoint (bad io_count)." << std::endl;
+    exit(1);
   }
 
   gzclose(file);

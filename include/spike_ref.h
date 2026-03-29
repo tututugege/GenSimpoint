@@ -10,6 +10,7 @@
 
 #include "ref.h"
 #include <cassert>
+#include <cstring>
 #include <fcntl.h>
 #include <fstream>
 #include <iomanip>
@@ -18,7 +19,6 @@
 #include <string>
 #include <unistd.h>
 #include <vector>
-#include <cstring>
 
 // Memory for Spike, isolated from DUT to prevent corruption
 class SpikeMem : public mem_t {
@@ -58,8 +58,10 @@ public:
 
     main_mem_ptr = new SpikeMem(ram_size);
     plic_mem_ptr = new mem_t(0x210000); // PLIC area from DTB
-    uart_mem_ptr = new mem_t(0x1000);   // UART area (increased to 4KB for alignment)
-    timer_mem_ptr = new mem_t(0x1000);  // Timer area (increased to 4KB for alignment)
+    uart_mem_ptr =
+        new mem_t(0x1000); // UART area (increased to 4KB for alignment)
+    timer_mem_ptr =
+        new mem_t(0x1000); // Timer area (increased to 4KB for alignment)
     boot_mem_ptr = new mem_t(0x1000); // Boot ROM at 0x1000
 
     // Initialize Boot ROM at 0x1000
@@ -100,7 +102,8 @@ public:
       sim = std::make_unique<sim_t>(
           cfg.get(), false, mems, plugin_device_factories, args, dm_config,
           nullptr, false, nullptr, false, nullptr, std::nullopt);
-      std::cout << "[SpikeRef] sim_t created successfully (Isolated Memory)." << std::endl;
+      std::cout << "[SpikeRef] sim_t created successfully (Isolated Memory)."
+                << std::endl;
     } catch (const std::exception &e) {
       std::cerr << "[SpikeRef] Exception creating sim_t: " << e.what()
                 << std::endl;
@@ -162,9 +165,9 @@ public:
 
     // Surgical CSR Check (the 21 implemented CSRs)
     static const uint32_t implemented_csr_addrs[21] = {
-        0x305, 0x341, 0x342, 0x304, 0x344, 0x343, 0x340, 0x300, 0x303, 0x302,
-        0x141, 0x105, 0x142, 0x140, 0x143, 0x100, 0x104, 0x144, 0x180, 0xf14,
-        0x301};
+        0x305, 0x341, 0x342, 0x304, 0x344, 0x343, 0x340,
+        0x300, 0x303, 0x302, 0x141, 0x105, 0x142, 0x140,
+        0x143, 0x100, 0x104, 0x144, 0x180, 0xf14, 0x301};
     bool csr_mismatch = false;
     bool csr_mismatches[21] = {false};
     uint32_t ref_csr_vals[21];
@@ -172,8 +175,8 @@ public:
     for (int i = 0; i < 21; ++i) {
       ref_csr_vals[i] = (uint32_t)p->get_csr(implemented_csr_addrs[i]);
       if (ref_csr_vals[i] != dut_state.csr[i]) {
-        // Special case for mstatus/sstatus where Spike might have different SD/UXL bits
-        // For now, let's report all mismatches to be strict.
+        // Special case for mstatus/sstatus where Spike might have different
+        // SD/UXL bits For now, let's report all mismatches to be strict.
         csr_mismatch = true;
         csr_mismatches[i] = true;
       }
@@ -194,8 +197,10 @@ public:
         } catch (...) {
           // Fallback to physical load if MMU fetch fails
           uint32_t phys_pc = pc;
-          if (pc >= 0xc0000000) phys_pc = pc - 0xc0000000 + 0x80000000;
-          if (phys_pc >= 0x80000000 && (phys_pc - 0x80000000 + 4) <= main_mem_ptr->size()) {
+          if (pc >= 0xc0000000)
+            phys_pc = pc - 0xc0000000 + 0x80000000;
+          if (phys_pc >= 0x80000000 &&
+              (phys_pc - 0x80000000 + 4) <= main_mem_ptr->size()) {
             uint8_t buf[4];
             if (main_mem_ptr->load(phys_pc - 0x80000000, 4, buf)) {
               val = (uint32_t)buf[0] | ((uint32_t)buf[1] << 8) |
@@ -273,10 +278,12 @@ public:
         }
         std::cout << "  Insn (Ref Mem):    0x" << std::hex << mepc_insn_ref
                   << std::endl;
-        std::cout << "  Insn (DUT State):  0x" << dut_state.inst << std::endl;
+        extern Ref_cpu ref_cpu;
+        std::cout << "  Insn (DUT State):  0x" << ref_cpu.Instruction
+                  << std::endl;
 
         // Decode Store/Load and Walk Page Table
-        uint32_t insn = dut_state.inst;
+        uint32_t insn = ref_cpu.Instruction;
         uint32_t opcode = insn & 0x7F;
         reg_t v_addr = 0;
         bool has_vaddr = false;
@@ -390,22 +397,23 @@ public:
         std::cout << std::dec << std::endl;
       }
       std::cout << std::string(80, '-') << std::endl;
-      std::cout << std::left << std::setw(10) << "CSR Name" << std::setw(20) << "Address" 
-                << std::setw(20) << "Reference (Spike)" << "DUT (Simulator)" << std::endl;
+      std::cout << std::left << std::setw(10) << "CSR Name" << std::setw(20)
+                << "Address" << std::setw(20) << "Reference (Spike)"
+                << "DUT (Simulator)" << std::endl;
 
-      static const char* csr_names[21] = {
-          "mtvec", "mepc", "mcause", "mie", "mip", "mtval", "mscratch", "mstatus", "mideleg", "medeleg",
-          "sepc", "stvec", "scause", "sscratch", "stval", "sstatus", "sie", "sip", "satp", "mhartid",
-          "misa"
-      };
+      static const char *csr_names[21] = {
+          "mtvec",    "mepc",     "mcause",  "mie",     "mip",  "mtval",
+          "mscratch", "mstatus",  "mideleg", "medeleg", "sepc", "stvec",
+          "scause",   "sscratch", "stval",   "sstatus", "sie",  "sip",
+          "satp",     "mhartid",  "misa"};
 
       for (int i = 0; i < 21; ++i) {
         if (csr_mismatches[i]) {
           std::cout << "\033[1;31m"; // Red for mismatch
-          std::cout << std::left << std::setw(10) << csr_names[i] 
-                    << "0x" << std::setw(18) << std::hex << implemented_csr_addrs[i] 
-                    << "0x" << std::setw(18) << std::hex << ref_csr_vals[i] 
-                    << "0x" << std::setw(18) << std::hex << dut_state.csr[i] 
+          std::cout << std::left << std::setw(10) << csr_names[i] << "0x"
+                    << std::setw(18) << std::hex << implemented_csr_addrs[i]
+                    << "0x" << std::setw(18) << std::hex << ref_csr_vals[i]
+                    << "0x" << std::setw(18) << std::hex << dut_state.csr[i]
                     << " <-- MISMATCH\033[0m" << std::dec << std::endl;
         }
       }

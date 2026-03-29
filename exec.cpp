@@ -1,11 +1,45 @@
+#include "spike_ref.h"
 #include "CSR.h"
 #include "RISCV.h"
 #include "ref.h"
-#include "spike_ref.h"
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <map>
+
+namespace {
+constexpr uint32_t kRamBase = 0x80000000u;
+constexpr uint32_t kRamUpperBound = 0xC0000000u;
+constexpr uint32_t kRamSizeBytes = kRamUpperBound - kRamBase;
+
+[[noreturn]] void mem_oob_fatal(const char *op, uint32_t addr, uint32_t size) {
+  std::cerr << "[RefCPU] " << op << " out-of-bounds: addr=0x" << std::hex
+            << addr << ", size=" << std::dec << size
+            << ", required: addr + size <= 0xC0000000" << std::endl;
+  exit(1);
+}
+
+inline void check_mem_range_or_die(const char *op, uint32_t addr,
+                                   uint32_t size) {
+  if (size == 0) {
+    return;
+  }
+  const uint64_t end =
+      static_cast<uint64_t>(addr) + static_cast<uint64_t>(size) - 1;
+  if (end >= kRamUpperBound) {
+    mem_oob_fatal(op, addr, size);
+  }
+}
+
+inline bool is_ram_range(uint32_t addr, uint32_t size) {
+  if (size == 0 || addr < kRamBase) {
+    return false;
+  }
+  const uint64_t end =
+      static_cast<uint64_t>(addr) + static_cast<uint64_t>(size) - 1;
+  return end < kRamUpperBound;
+}
+} // namespace
 
 std::map<uint32_t, uint32_t> load_simpoints(const std::string &filename);
 
@@ -18,13 +52,20 @@ Ref_cpu::~Ref_cpu() {
 void Ref_cpu::init(uint32_t reset_pc, const char *image, uint32_t size) {
   state.pc = reset_pc;
   ram_size = size;
-  // memory = new uint32_t[ram_size];
-  memory = (uint32_t *)calloc(ram_size, sizeof(uint32_t));
+  if (ram_size != kRamSizeBytes) {
+    std::cerr << "[RefCPU] Unsupported RAM size: 0x" << std::hex << ram_size
+              << ", expected 0x" << kRamSizeBytes << std::dec << std::endl;
+    exit(1);
+  }
+
+  const uint32_t ram_words = ram_size / sizeof(uint32_t);
+  memory = (uint32_t *)calloc(ram_words, sizeof(uint32_t));
   if (!memory) {
-    std::cerr << "Error: Could not allocate " << ram_size * 4
+    std::cerr << "Error: Could not allocate " << ram_size
               << " bytes of memory" << std::endl;
     exit(1);
   }
+  io_words.clear();
 
   std::ifstream inst_data(image, std::ios::in | std::ios::binary);
   if (!inst_data.is_open()) {
@@ -37,30 +78,34 @@ void Ref_cpu::init(uint32_t reset_pc, const char *image, uint32_t size) {
   std::streamsize img_size = inst_data.tellg();
   inst_data.seekg(0, std::ios::beg);
 
-  // memory is indexed by word (4 bytes)
-  // ram_size is words, so ram_size * 4 is bytes.
-  // With PHYSICAL_MEMORY_LENGTH = 1G words, we cover 4GB address space.
+  if (img_size < 0 || static_cast<uint64_t>(img_size) > kRamSizeBytes) {
+    std::cerr << "[RefCPU] Image too large for 1GB RAM window: " << img_size
+              << " bytes" << std::endl;
+    exit(1);
+  }
+  const uint32_t img_bytes = static_cast<uint32_t>(img_size);
+  check_mem_range_or_die("image load", kRamBase, img_bytes);
+
   std::cout << "[RefCPU] Loading image at 0x80000000, size: " << img_size
             << " bytes" << std::endl;
-  if (!inst_data.read(reinterpret_cast<char *>(memory + 0x80000000 / 4),
-                      img_size)) {
+  if (!inst_data.read(reinterpret_cast<char *>(memory), img_bytes)) {
     std::cerr << "读取文件失败！" << std::endl;
     exit(1);
   }
 
-  memory[0x10000004 / 4] = 0x00006000; // 和进入 OpenSBI 相关
-  memory[uint32_t(0x0 / 4)] = 0xf1402573;
-  memory[uint32_t(0x4 / 4)] = 0x83e005b7;
-  memory[uint32_t(0x8 / 4)] = 0x800002b7;
-  memory[uint32_t(0xc / 4)] = 0x00028067;
-  memory[uint32_t(0x00001000 / 4)] = 0x00000297; // auipc t0,0
-  memory[uint32_t(0x00001004 / 4)] = 0x02828613; // addi a2,t0,40
-  memory[uint32_t(0x00001008 / 4)] = 0xf1402573; // csrrs a0,mhartid,zero
-  memory[uint32_t(0x0000100c / 4)] = 0x0202a583; // lw a1,32(t0)
-  memory[uint32_t(0x00001010 / 4)] = 0x0182a283; // lw t0,24(t0)
-  memory[uint32_t(0x00001014 / 4)] = 0x00028067; // jr              t0
-  memory[uint32_t(0x00001018 / 4)] = 0x80000000;
-  memory[uint32_t(0x00001020 / 4)] = 0x8fe00000;
+  store_word(0x10000004, 0x00006000); // 和进入 OpenSBI 相关
+  store_word(0x0, 0xf1402573);
+  store_word(0x4, 0x83e005b7);
+  store_word(0x8, 0x800002b7);
+  store_word(0xc, 0x00028067);
+  store_word(0x00001000, 0x00000297); // auipc t0,0
+  store_word(0x00001004, 0x02828613); // addi a2,t0,40
+  store_word(0x00001008, 0xf1402573); // csrrs a0,mhartid,zero
+  store_word(0x0000100c, 0x0202a583); // lw a1,32(t0)
+  store_word(0x00001010, 0x0182a283); // lw t0,24(t0)
+  store_word(0x00001014, 0x00028067); // jr              t0
+  store_word(0x00001018, 0x80000000);
+  store_word(0x00001020, 0x8fe00000);
 
   inst_data.close();
 
@@ -483,12 +528,10 @@ void Ref_cpu::RISCV() {
     if (page_fault_inst) {
       exception(state.pc);
       return;
-    } else {
-      Instruction = memory[p_addr >> 2];
     }
-  } else {
-    Instruction = memory[p_addr >> 2];
   }
+  check_mem_range_or_die("instruction fetch", p_addr, 4);
+  Instruction = load_word(p_addr);
 
   if (Instruction == INST_EBREAK) {
     uint32_t exit_code = state.gpr[10]; // a0
@@ -779,6 +822,7 @@ void Ref_cpu::RV32A() {
       return;
     }
   }
+  check_mem_range_or_die("amo", p_addr, 4);
 
   if (funct5 != 2) {
     state.store = true;
@@ -788,17 +832,17 @@ void Ref_cpu::RV32A() {
 
   switch (funct5) {
   case 0: { // amoadd.w
-    state.gpr[reg_d_index] = memory[p_addr >> 2];
-    state.store_data = memory[p_addr >> 2] + reg_rdata2;
+    state.gpr[reg_d_index] = load_word(p_addr);
+    state.store_data = state.gpr[reg_d_index] + reg_rdata2;
     break;
   }
   case 1: { // amoswap.w
-    state.gpr[reg_d_index] = memory[p_addr >> 2];
+    state.gpr[reg_d_index] = load_word(p_addr);
     state.store_data = reg_rdata2;
     break;
   }
   case 2: { // lr.w
-    state.gpr[reg_d_index] = memory[p_addr >> 2];
+    state.gpr[reg_d_index] = load_word(p_addr);
     state.reserve_valid = true;
     state.reserve_addr = p_addr;
     break;
@@ -816,45 +860,45 @@ void Ref_cpu::RV32A() {
     break;
   }
   case 4: { // amoxor.w
-    state.gpr[reg_d_index] = memory[p_addr >> 2];
-    state.store_data = memory[p_addr >> 2] ^ reg_rdata2;
+    state.gpr[reg_d_index] = load_word(p_addr);
+    state.store_data = state.gpr[reg_d_index] ^ reg_rdata2;
     break;
   }
   case 8: { // amoor.w
-    state.gpr[reg_d_index] = memory[p_addr >> 2];
-    state.store_data = memory[p_addr >> 2] | reg_rdata2;
+    state.gpr[reg_d_index] = load_word(p_addr);
+    state.store_data = state.gpr[reg_d_index] | reg_rdata2;
     break;
   }
   case 12: { // amoand.w
-    state.gpr[reg_d_index] = memory[p_addr >> 2];
-    state.store_data = memory[p_addr >> 2] & reg_rdata2;
+    state.gpr[reg_d_index] = load_word(p_addr);
+    state.store_data = state.gpr[reg_d_index] & reg_rdata2;
     break;
   }
   case 16: { // amomin.w
-    state.gpr[reg_d_index] = memory[p_addr >> 2];
-    state.store_data = ((int32_t)memory[p_addr >> 2] > (int32_t)reg_rdata2)
+    state.gpr[reg_d_index] = load_word(p_addr);
+    state.store_data = ((int32_t)state.gpr[reg_d_index] > (int32_t)reg_rdata2)
                            ? reg_rdata2
-                           : memory[p_addr >> 2];
+                           : state.gpr[reg_d_index];
     break;
   }
   case 20: { // amomax.w
-    state.gpr[reg_d_index] = memory[p_addr >> 2];
-    state.store_data = ((int32_t)memory[p_addr >> 2] > (int32_t)reg_rdata2)
-                           ? memory[p_addr >> 2]
+    state.gpr[reg_d_index] = load_word(p_addr);
+    state.store_data = ((int32_t)state.gpr[reg_d_index] > (int32_t)reg_rdata2)
+                           ? state.gpr[reg_d_index]
                            : reg_rdata2;
     break;
   }
   case 24: { // amominu.w
-    state.gpr[reg_d_index] = memory[p_addr >> 2];
-    state.store_data = ((uint32_t)memory[p_addr >> 2] < (uint32_t)reg_rdata2)
-                           ? memory[p_addr >> 2]
+    state.gpr[reg_d_index] = load_word(p_addr);
+    state.store_data = ((uint32_t)state.gpr[reg_d_index] < (uint32_t)reg_rdata2)
+                           ? state.gpr[reg_d_index]
                            : reg_rdata2;
     break;
   }
   case 28: { // amomaxu.w
-    state.gpr[reg_d_index] = memory[p_addr >> 2];
-    state.store_data = ((uint32_t)memory[p_addr >> 2] > (uint32_t)reg_rdata2)
-                           ? memory[p_addr >> 2]
+    state.gpr[reg_d_index] = load_word(p_addr);
+    state.store_data = ((uint32_t)state.gpr[reg_d_index] > (uint32_t)reg_rdata2)
+                           ? state.gpr[reg_d_index]
                            : reg_rdata2;
     break;
   }
@@ -958,6 +1002,7 @@ void Ref_cpu::RV32IM() {
     uint32_t p_addr = v_addr;
 
     uint32_t size = funct3 & 0b11;
+    uint32_t access_size = (size == 0b00) ? 1 : ((size == 0b01) ? 2 : 4);
     if ((size == 0b01 && (v_addr % 2 != 0)) ||
         (size == 0b10 && (v_addr % 4 != 0))) {
       std::cerr << "Misaligned Load! addr: 0x" << std::hex << v_addr
@@ -979,7 +1024,8 @@ void Ref_cpu::RV32IM() {
       return;
 
     } else {
-      uint32_t data = memory[p_addr >> 2];
+      check_mem_range_or_die("load", p_addr, access_size);
+      uint32_t data = load_word(p_addr);
       uint32_t offset = p_addr & 0b11;
       uint32_t size = funct3 & 0b11;
       uint32_t sign = 0, mask;
@@ -1018,6 +1064,7 @@ void Ref_cpu::RV32IM() {
 
     uint32_t v_addr = reg_rdata1 + immS(Instruction);
     uint32_t p_addr = v_addr;
+    uint32_t access_size = (funct3 == 0b00) ? 1 : ((funct3 == 0b01) ? 2 : 4);
 
     if ((funct3 == 0b01 && (v_addr % 2 != 0)) ||
         (funct3 == 0b10 && (v_addr % 4 != 0))) {
@@ -1034,6 +1081,7 @@ void Ref_cpu::RV32IM() {
       exception(v_addr);
       return;
     } else {
+      check_mem_range_or_die("store", p_addr, access_size);
 
       state.store = true;
       state.store_addr = p_addr;
@@ -1367,8 +1415,33 @@ void Ref_cpu::RV32IM() {
   state.pc = next_pc;
 }
 
+uint32_t Ref_cpu::load_word(uint32_t addr) const {
+  const uint32_t word_addr = addr & ~0x3u;
+  if (is_ram_range(word_addr, 4)) {
+    return memory[(word_addr - kRamBase) >> 2];
+  }
+
+  check_mem_range_or_die("word load", word_addr, 4);
+  auto it = io_words.find(word_addr);
+  return (it == io_words.end()) ? 0 : it->second;
+}
+
+void Ref_cpu::store_word(uint32_t addr, uint32_t data) {
+  const uint32_t word_addr = addr & ~0x3u;
+  if (is_ram_range(word_addr, 4)) {
+    memory[(word_addr - kRamBase) >> 2] = data;
+    return;
+  }
+
+  check_mem_range_or_die("word store", word_addr, 4);
+  io_words[word_addr] = data;
+}
+
 void Ref_cpu::store_data() {
   uint32_t p_addr = state.store_addr;
+  uint32_t write_size =
+      (state.store_strb == 0b1) ? 1 : ((state.store_strb == 0b11) ? 2 : 4);
+  check_mem_range_or_die("store_data", p_addr, write_size);
   if (state.store) {
     state.reserve_valid = false; // Any store (including successful SC)
                                  // invalidates the reservation
@@ -1376,7 +1449,7 @@ void Ref_cpu::store_data() {
   int offset = p_addr & 0x3;
   uint32_t wstrb = state.store_strb << offset;
   uint32_t wdata = state.store_data << (offset * 8);
-  uint32_t old_data = memory[p_addr / 4];
+  uint32_t old_data = load_word(p_addr);
   uint32_t mask = 0;
 
   if (wstrb & 0b1)
@@ -1389,19 +1462,19 @@ void Ref_cpu::store_data() {
     mask |= 0xFF000000;
 
   if (state.store) {
-    memory[p_addr / 4] = (mask & wdata) | (~mask & old_data);
+    store_word(p_addr, (mask & wdata) | (~mask & old_data));
   }
 
   if (p_addr == UART_BASE) {
     char temp;
     temp = wdata & 0x000000ff;
-    memory[0x10000000 / 4] = memory[0x10000000 / 4] & 0xffffff00;
+    store_word(0x10000000, load_word(0x10000000) & 0xffffff00);
     std::cout << temp;
   }
 
   if (p_addr == 0x10000001 && (state.store_data & 0x000000ff) == 7) {
-    memory[0xc201004 / 4] = 0xa;
-    memory[0x10000000 / 4] = memory[0x10000000 / 4] & 0xfff0ffff;
+    store_word(0xc201004, 0xa);
+    store_word(0x10000000, load_word(0x10000000) & 0xfff0ffff);
 
     state.csr[csr_mip] = state.csr[csr_mip] | (1 << 9);
     state.csr[csr_sip] = state.csr[csr_sip] | (1 << 9);
@@ -1409,11 +1482,11 @@ void Ref_cpu::store_data() {
   }
 
   if (p_addr == 0x10000001 && (state.store_data & 0x000000ff) == 5) {
-    memory[0x10000000 / 4] = memory[0x10000000 / 4] & 0xfff0ffff | 0x00030000;
+    store_word(0x10000000, (load_word(0x10000000) & 0xfff0ffff) | 0x00030000);
   }
 
   if (p_addr == 0xc201004 && (state.store_data & 0x000000ff) == 0xa) {
-    memory[0xc201004 / 4] = 0x0;
+    store_word(0xc201004, 0x0);
     state.csr[csr_mip] = state.csr[csr_mip] & ~(1 << 9);
     state.csr[csr_sip] = state.csr[csr_sip] & ~(1 << 9);
     force_sync = true;
@@ -1448,7 +1521,8 @@ bool Ref_cpu::va2pa(uint32_t &p_addr, uint32_t v_addr, uint32_t type) {
   uint32_t pte1_addr = (ppn_root << 12) | (vpn1 << 2);
 
   // 直接读取，注意这里需要确保 memory 是按字寻址还是字节寻址
-  uint32_t pte1 = memory[pte1_addr >> 2];
+  check_mem_range_or_die("ptw-l1", pte1_addr, 4);
+  uint32_t pte1 = load_word(pte1_addr);
 
   // 3. 检查 PTE 有效性
   // !V 或者 (!R && W) 都是无效的
@@ -1503,7 +1577,8 @@ bool Ref_cpu::va2pa(uint32_t &p_addr, uint32_t v_addr, uint32_t type) {
   uint32_t vpn0 = (v_addr >> 12) & 0x3FF;
   uint32_t pte2_addr = (ppn1 << 12) | (vpn0 << 2);
 
-  uint32_t pte2 = memory[pte2_addr >> 2];
+  check_mem_range_or_die("ptw-l2", pte2_addr, 4);
+  uint32_t pte2 = load_word(pte2_addr);
 
   // 重复有效性检查
   if (!(pte2 & PTE_V) || (!(pte2 & PTE_R) && (pte2 & PTE_W))) {

@@ -122,7 +122,7 @@ class SpikeRef;
 
 // ===================================================================
 //
-#define MAX_SIM_TIME 500000000
+#define MAX_SIM_TIME 500000000000
 
 // --- 1. 定义四种运行模式 ---
 enum class SimMode {
@@ -169,6 +169,7 @@ class Ref_cpu {
 public:
   ~Ref_cpu();
   uint32_t *memory;
+  std::unordered_map<uint32_t, uint32_t> io_words;
   uint32_t ram_size;
   uint32_t Instruction;
   CPU_state state;
@@ -207,6 +208,8 @@ public:
   void FORCE_INLINE RV32CSR();
   void exception(uint32_t trap_val);
   void store_data();
+  uint32_t load_word(uint32_t addr) const;
+  void store_word(uint32_t addr, uint32_t data);
 
   const uint64_t INTERVAL_SIZE = 100000000;
   uint64_t interval_inst_count = 0;

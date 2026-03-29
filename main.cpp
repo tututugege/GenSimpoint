@@ -1,6 +1,6 @@
+#include "spike_ref.h"
 #include "RISCV.h"
 #include "ref.h"
-#include "spike_ref.h"
 #include <cstdlib>
 
 Ref_cpu ref_cpu;

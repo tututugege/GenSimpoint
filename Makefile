@@ -11,7 +11,7 @@ IMG = ./baremetal/memory
 all: $(TARGET)
 
 $(TARGET): $(CXXSRC) $(wildcard include/*.h)
-	$(CXX) $(CXXINCLUDE) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
+	$(CXX) $(CXXINCLUDE) $(CXXFLAGS) $(CXXSRC) -o $@ $(LDFLAGS)
 
 run: $(TARGET)
 	./$(TARGET) $(IMG)
