@@ -57,9 +57,8 @@ public:
     cfg->start_pc = 0x80000000;
 
     main_mem_ptr = new SpikeMem(ram_size);
-    plic_mem_ptr = new mem_t(0x210000); // PLIC area from DTB
-    uart_mem_ptr =
-        new mem_t(0x1000); // UART area (increased to 4KB for alignment)
+    plic_mem_ptr = new mem_t(PLIC_MMIO_SIZE); // PLIC area from DTB
+    uart_mem_ptr = new mem_t(UART_MMIO_SIZE); // UART area from DTB
     timer_mem_ptr =
         new mem_t(0x1000); // Timer area (increased to 4KB for alignment)
     boot_mem_ptr = new mem_t(0x1000); // Boot ROM at 0x1000

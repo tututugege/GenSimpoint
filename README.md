@@ -63,9 +63,9 @@ make -j$(nproc)
 ### 2. IO / Boot（离散存储）
 - `0x00000000` 附近：启动 stub（启动阶段写入）
 - `0x00001000` 附近：Boot ROM stub（启动阶段写入）
-- `0x10000000`：UART 基址（写入会输出字符）
+- `0x10000000 - 0x100000ff`：UART（`tree.dts` 对应 `reg size = 0x100`）
 - `0x10000004`：OpenSBI 兼容寄存器（初始化写 `0x00006000`）
-- `0x0c000000`：PLIC 基址
+- `0x0c000000 - 0x0c20ffff`：PLIC（`tree.dts` 对应 `reg size = 0x210000`）
 - `0x0c201004`：PLIC 中断相关寄存器（UART/PLIC 联动逻辑会访问）
 - `0x1fd0e000`：Timer 寄存器（读取返回 `sim_time`）
 - `0x1fd0e004`：Timer 高位寄存器（当前返回 0）
@@ -80,19 +80,44 @@ make -j$(nproc)
 
 Checkpoint 使用 `zlib gzip`（写模式 `wb1`，文件后缀通常为 `.gz`），按如下顺序写入：
 
-1. `CPU_state`（POD 原样二进制）
-2. `interval_inst_count`（`uint64_t`）
-3. `RAM` 原始字节流（固定 `ram_size` 字节，当前为 1GB）
-4. `io_count`（`uint32_t`，离散 IO word 数）
-5. `io_entries`（重复 `io_count` 次，每次两个 `uint32_t`：`addr`, `data`）
+1. `header`（固定 16 字节）
+2. `CPU_state`（POD 原样二进制）
+3. `interval_inst_count`（`uint64_t`）
+4. `RAM` 原始字节流（固定 `ram_size` 字节，当前为 1GB）
+5. `io_ranges + io_data`（重复 `io_range_count` 次）：
+   - `io_range`：两个 `uint32_t`（`base`, `size`）
+   - `io_data`：紧随其后的 `size` 字节原始数据
 
-其中：
-- `CPU_state` 定义在 `include/ref.h`，包含 GPR/CSR/PC 以及 store/reserve 相关字段。
-- RAM 按字节连续写入；内部按最多 1GB 分块进行 `gzwrite/gzread`。
+### 当前配置下的精确布局（未压缩逻辑布局）
+- `header` 字段顺序为：
+  - `magic`：`"Rem\0"`（4 字节）
+  - `version`：当前为 `2`
+  - `ram_size`：字节数（当前为 1GB）
+  - `io_range_count`
+- `CPU_state` 当前大小：`236` 字节（`0xEC`）
+- `interval_inst_count` 大小：`8` 字节
+- `RAM` 大小：`0x40000000` 字节（1GB）
+- `io_range_count` 当前为 `4`，顺序固定为：`BOOT -> UART -> PLIC -> TIMER`
+
+| 区段 | 起始偏移 | 结束偏移 | 大小 |
+| :--- | :--- | :--- | :--- |
+| Header | `0x00000000` | `0x0000000F` | `0x10` |
+| CPU_state | `0x00000010` | `0x000000FB` | `0xEC` |
+| interval_inst_count | `0x000000FC` | `0x00000103` | `0x08` |
+| RAM | `0x00000104` | `0x40000103` | `0x40000000` |
+| BOOT range descriptor (`base,size`) | `0x40000104` | `0x4000010B` | `0x08` |
+| BOOT data (`base=0x00000000,size=0x2000`) | `0x4000010C` | `0x4000210B` | `0x2000` |
+| UART range descriptor (`base,size`) | `0x4000210C` | `0x40002113` | `0x08` |
+| UART data (`base=0x10000000,size=0x100`) | `0x40002114` | `0x40002213` | `0x100` |
+| PLIC range descriptor (`base,size`) | `0x40002214` | `0x4000221B` | `0x08` |
+| PLIC data (`base=0x0c000000,size=0x210000`) | `0x4000221C` | `0x4021221B` | `0x210000` |
+| TIMER range descriptor (`base,size`) | `0x4021221C` | `0x40212223` | `0x08` |
+| TIMER data (`base=0x1fd0e000,size=0x8`) | `0x40212224` | `0x4021222B` | `0x08` |
+
+总逻辑大小（未压缩）为 `0x4021222C` 字节（`1,075,913,260` 字节）。实际文件大小会因 gzip 压缩而变小。
 
 ### 兼容性
-- 新版本恢复时兼容旧 checkpoint：
-  只有前 3 部分（无 `io_count/io_entries`）也可恢复；此时 IO 表保持初始化默认值。
+- 当前恢复逻辑只支持新格式（含 `header`、`io_ranges`、`io_data`），不兼容旧格式。
 
 ---
 
@@ -105,17 +130,18 @@ Checkpoint 使用 `zlib gzip`（写模式 `wb1`，文件后缀通常为 `.gz`）
 
 恢复流程：
 1. 先通过 `init()` 分配 1GB RAM，并完成默认 Boot/IO 初始化
-2. `restore_checkpoint()` 覆盖 `CPU_state` 和 `interval_inst_count`
-3. 覆盖整个 1GB RAM 内容
-4. 若文件中包含 IO 表，则覆盖离散 IO；否则保持初始化 IO 状态
+2. 读取并校验 `header`（magic/version/ram_size）
+3. `restore_checkpoint()` 覆盖 `CPU_state` 和 `interval_inst_count`
+4. 覆盖整个 1GB RAM 内容
+5. 读取并校验 IO 布局（base+size）是否与当前模拟器配置一致
+6. 读取每个 range 的 `io_data` 并恢复 IO 内容
 
 ### 2. 离线解析 checkpoint（二次开发）
 若需要自己读取文件，按“Checkpoint 格式”中的顺序使用 `gzread` 逐段解析即可。关键点：
+- 必须先校验 `magic="Rem\0"` 与 `version=2`
 - 必须使用与当前程序一致的 `CPU_state` 结构体布局（同编译器/ABI 假设）
 - RAM 字节数必须与运行配置一致（当前固定 1GB）
-- 解析完 RAM 后，尝试读取 `io_count`：
-  - 读到 4 字节：继续读取 IO entries
-  - 读到 0 字节（EOF）：视为旧格式文件
+- 最后按 `io_ranges` 顺序读取并校验，再读取对应 `io_data`
 
 ---
 

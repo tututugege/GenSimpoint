@@ -98,14 +98,6 @@ void Ref_cpu::init(uint32_t reset_pc, const char *image, uint32_t size) {
   store_word(0x4, 0x83e005b7);
   store_word(0x8, 0x800002b7);
   store_word(0xc, 0x00028067);
-  store_word(0x00001000, 0x00000297); // auipc t0,0
-  store_word(0x00001004, 0x02828613); // addi a2,t0,40
-  store_word(0x00001008, 0xf1402573); // csrrs a0,mhartid,zero
-  store_word(0x0000100c, 0x0202a583); // lw a1,32(t0)
-  store_word(0x00001010, 0x0182a283); // lw t0,24(t0)
-  store_word(0x00001014, 0x00028067); // jr              t0
-  store_word(0x00001018, 0x80000000);
-  store_word(0x00001020, 0x8fe00000);
 
   inst_data.close();
 
@@ -737,13 +729,13 @@ void Ref_cpu::RV32CSR() {
         // sie 始终是 mie 的影子 (masked by 0x333)
         state.csr[csr_sie] = state.csr[csr_mie] & sie_mask;
 
-      } else if (csr_idx == number_mip || csr_idx == number_sip) {
+      } else if (csr_idx == csr_mip || csr_idx == csr_sip) {
         uint32_t mip_mask =
             0x00000bbb; // MEIP(11), SEIP(9), MTIP(7), STIP(5), MSIP(3), SSIP(1)
         uint32_t sip_mask =
             0x00000333; // SEIP(9), UEIP(8), STIP(5), UTIP(4), SSIP(1), USIP(0)
 
-        if (csr_idx == number_sip) {
+        if (csr_idx == csr_sip) {
           // sip: 0x333 (Include User-Level Interrupt bits)
           state.csr[csr_mip] =
               (state.csr[csr_mip] & ~sip_mask) | (csr_wdata & sip_mask);
@@ -829,20 +821,21 @@ void Ref_cpu::RV32A() {
     state.store_addr = p_addr;
     state.store_strb = 0b1111;
   }
+  uint32_t old_word = load_word(p_addr);
 
   switch (funct5) {
   case 0: { // amoadd.w
-    state.gpr[reg_d_index] = load_word(p_addr);
-    state.store_data = state.gpr[reg_d_index] + reg_rdata2;
+    state.gpr[reg_d_index] = old_word;
+    state.store_data = old_word + reg_rdata2;
     break;
   }
   case 1: { // amoswap.w
-    state.gpr[reg_d_index] = load_word(p_addr);
+    state.gpr[reg_d_index] = old_word;
     state.store_data = reg_rdata2;
     break;
   }
   case 2: { // lr.w
-    state.gpr[reg_d_index] = load_word(p_addr);
+    state.gpr[reg_d_index] = old_word;
     state.reserve_valid = true;
     state.reserve_addr = p_addr;
     break;
@@ -860,46 +853,42 @@ void Ref_cpu::RV32A() {
     break;
   }
   case 4: { // amoxor.w
-    state.gpr[reg_d_index] = load_word(p_addr);
-    state.store_data = state.gpr[reg_d_index] ^ reg_rdata2;
+    state.gpr[reg_d_index] = old_word;
+    state.store_data = old_word ^ reg_rdata2;
     break;
   }
   case 8: { // amoor.w
-    state.gpr[reg_d_index] = load_word(p_addr);
-    state.store_data = state.gpr[reg_d_index] | reg_rdata2;
+    state.gpr[reg_d_index] = old_word;
+    state.store_data = old_word | reg_rdata2;
     break;
   }
   case 12: { // amoand.w
-    state.gpr[reg_d_index] = load_word(p_addr);
-    state.store_data = state.gpr[reg_d_index] & reg_rdata2;
+    state.gpr[reg_d_index] = old_word;
+    state.store_data = old_word & reg_rdata2;
     break;
   }
   case 16: { // amomin.w
-    state.gpr[reg_d_index] = load_word(p_addr);
-    state.store_data = ((int32_t)state.gpr[reg_d_index] > (int32_t)reg_rdata2)
-                           ? reg_rdata2
-                           : state.gpr[reg_d_index];
+    state.gpr[reg_d_index] = old_word;
+    state.store_data =
+        ((int32_t)old_word > (int32_t)reg_rdata2) ? reg_rdata2 : old_word;
     break;
   }
   case 20: { // amomax.w
-    state.gpr[reg_d_index] = load_word(p_addr);
-    state.store_data = ((int32_t)state.gpr[reg_d_index] > (int32_t)reg_rdata2)
-                           ? state.gpr[reg_d_index]
-                           : reg_rdata2;
+    state.gpr[reg_d_index] = old_word;
+    state.store_data =
+        ((int32_t)old_word > (int32_t)reg_rdata2) ? old_word : reg_rdata2;
     break;
   }
   case 24: { // amominu.w
-    state.gpr[reg_d_index] = load_word(p_addr);
-    state.store_data = ((uint32_t)state.gpr[reg_d_index] < (uint32_t)reg_rdata2)
-                           ? state.gpr[reg_d_index]
-                           : reg_rdata2;
+    state.gpr[reg_d_index] = old_word;
+    state.store_data =
+        ((uint32_t)old_word < (uint32_t)reg_rdata2) ? old_word : reg_rdata2;
     break;
   }
   case 28: { // amomaxu.w
-    state.gpr[reg_d_index] = load_word(p_addr);
-    state.store_data = ((uint32_t)state.gpr[reg_d_index] > (uint32_t)reg_rdata2)
-                           ? state.gpr[reg_d_index]
-                           : reg_rdata2;
+    state.gpr[reg_d_index] = old_word;
+    state.store_data =
+        ((uint32_t)old_word > (uint32_t)reg_rdata2) ? old_word : reg_rdata2;
     break;
   }
   default: {
@@ -907,7 +896,9 @@ void Ref_cpu::RV32A() {
   }
   }
 
-  store_data();
+  if (state.store) {
+    store_data();
+  }
   state.pc = next_pc;
 }
 
