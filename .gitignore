@@ -1,8 +1,6 @@
 # Build Artifacts
 a.out
 *.o
-*.a
-*.so
 compile_commands.json
 
 # Simulation Logs
