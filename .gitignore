@@ -31,3 +31,7 @@ checkpoint/
 
 # Temporary / OS generated
 tmp/
+
+# Large Spike-related prebuilt libs
+lib/libriscv.so
+lib/libfesvr.a

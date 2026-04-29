@@ -1,6 +1,6 @@
 # RISC-V Full-System Simulator
 
-这是一个轻量级、高性能的 RISC-V 32位全系统模拟器，支持 RV32IMAB 指令集，并集成了基于 Spike 的差异化测试 (Difftest) 以及 SimPoint 分析功能。
+这是一个轻量级、高性能的 RISC-V 32位全系统模拟器，支持 RV32IMAB + Zfinx 指令集，并集成了基于 Spike 的差异化测试 (Difftest) 以及 SimPoint 分析功能。
 
 ---
 
@@ -11,6 +11,26 @@
 ```bash
 make -j$(nproc)
 ```
+
+默认构建是 **不带 Spike**（`SPIKE=0`，可在没有 `libriscv`/`libfesvr` 的环境下编译）。
+
+如需显式切换：
+```bash
+# 带 Spike（产物 a.out）
+make with_spike
+
+# 不带 Spike（产物 a.out.nospike）
+make no_spike
+```
+
+说明：
+- `a.out.nospike` 下如果传 `--diff`，会打印 warning 并自动禁用 difftest。
+- `a.out`（with_spike）才会真正执行 Spike difftest。
+
+### 1.1 SoftFloat 说明（no_spike 模式）
+- `SPIKE=0` 时，默认链接仓库内的 `lib/softfloat/softfloat.a`。
+- 如果出现 SoftFloat ABI/行为不兼容（例如链接错误或浮点结果异常），可以自行使用 Berkeley SoftFloat 重新编译静态库并替换该文件。
+- 只要保持头文件与库版本一致即可（当前 include 路径为 `lib/softfloat/include`）。
 
 ### 2. 基础运行
 最简单的运行方式，加载二进制镜像并开始执行：

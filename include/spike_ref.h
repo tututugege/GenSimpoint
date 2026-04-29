@@ -42,6 +42,11 @@ public:
 
   SpikeRef(const char *isa, reg_t ram_base, reg_t ram_size,
            const char *image_file) {
+    auto align_up_4k = [](reg_t size) -> reg_t {
+      const reg_t kPage = 4096;
+      return (size + kPage - 1) & ~(kPage - 1);
+    };
+
     std::cout << "[SpikeRef] Initializing with ISA=" << isa << " Base=0x"
               << std::hex << ram_base << std::dec << " Size=0x" << std::hex
               << ram_size << std::dec << std::endl;
@@ -57,10 +62,9 @@ public:
     cfg->start_pc = 0x80000000;
 
     main_mem_ptr = new SpikeMem(ram_size);
-    plic_mem_ptr = new mem_t(PLIC_MMIO_SIZE); // PLIC area from DTB
-    uart_mem_ptr = new mem_t(UART_MMIO_SIZE); // UART area from DTB
-    timer_mem_ptr =
-        new mem_t(0x1000); // Timer area (increased to 4KB for alignment)
+    plic_mem_ptr = new mem_t(align_up_4k(PLIC_MMIO_SIZE)); // PLIC area from DTB
+    uart_mem_ptr = new mem_t(align_up_4k(UART_MMIO_SIZE)); // UART area from DTB
+    timer_mem_ptr = new mem_t(align_up_4k(0x1000)); // Timer area
     boot_mem_ptr = new mem_t(0x1000); // Boot ROM at 0x1000
 
     // Initialize Boot ROM at 0x1000

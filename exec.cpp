@@ -1,4 +1,6 @@
+#ifdef ENABLE_SPIKE
 #include "spike_ref.h"
+#endif
 #include "CSR.h"
 #include "RISCV.h"
 #include "ref.h"
@@ -6,6 +8,13 @@
 #include <cstdlib>
 #include <iostream>
 #include <map>
+extern "C" {
+#ifdef USE_SIMULATOR_SOFTFLOAT
+#include "softfloat.h"
+#else
+#include "softfloat/softfloat.h"
+#endif
+}
 
 namespace {
 constexpr uint32_t kRamBase = 0x80000000u;
@@ -38,6 +47,104 @@ inline bool is_ram_range(uint32_t addr, uint32_t size) {
   const uint64_t end =
       static_cast<uint64_t>(addr) + static_cast<uint64_t>(size) - 1;
   return end < kRamUpperBound;
+}
+
+static inline float32_t to_f32(uint32_t v) {
+  float32_t f;
+  f.v = v;
+  return f;
+}
+
+static inline uint32_t from_f32(float32_t f) { return f.v; }
+
+static inline bool is_nan32(uint32_t v) {
+  return ((v & 0x7F800000u) == 0x7F800000u) && ((v & 0x007FFFFFu) != 0);
+}
+
+static inline bool is_snan32(uint32_t v) {
+  return is_nan32(v) && (((v >> 22) & 1u) == 0);
+}
+
+static inline uint32_t f32_min_riscv(uint32_t a, uint32_t b) {
+  if (is_snan32(a) || is_snan32(b)) {
+    softfloat_exceptionFlags |= softfloat_flag_invalid;
+  }
+  const bool a_nan = is_nan32(a);
+  const bool b_nan = is_nan32(b);
+  if (a_nan && b_nan)
+    return 0x7fc00000u;
+  if (a_nan)
+    return b;
+  if (b_nan)
+    return a;
+
+  const float32_t fa = to_f32(a);
+  const float32_t fb = to_f32(b);
+  if (f32_lt(fa, fb))
+    return a;
+  if (f32_lt(fb, fa))
+    return b;
+  return a | b; // -0.0 wins on ties
+}
+
+static inline uint32_t f32_max_riscv(uint32_t a, uint32_t b) {
+  if (is_snan32(a) || is_snan32(b)) {
+    softfloat_exceptionFlags |= softfloat_flag_invalid;
+  }
+  const bool a_nan = is_nan32(a);
+  const bool b_nan = is_nan32(b);
+  if (a_nan && b_nan)
+    return 0x7fc00000u;
+  if (a_nan)
+    return b;
+  if (b_nan)
+    return a;
+
+  const float32_t fa = to_f32(a);
+  const float32_t fb = to_f32(b);
+  if (f32_lt(fa, fb))
+    return b;
+  if (f32_lt(fb, fa))
+    return a;
+  return a & b; // +0.0 wins on ties
+}
+
+static inline uint32_t f32_classify_riscv(float32_t f) {
+  const uint32_t bits = from_f32(f);
+  const uint32_t sign = (bits >> 31) & 1u;
+  const uint32_t exp = (bits >> 23) & 0xFFu;
+  const uint32_t mant = bits & 0x7FFFFFu;
+
+  const bool is_subnormal = (exp == 0) && (mant != 0);
+  const bool is_zero = (exp == 0) && (mant == 0);
+  const bool is_inf = (exp == 0xFFu) && (mant == 0);
+  const bool is_nan = (exp == 0xFFu) && (mant != 0);
+  const bool is_snan = is_nan && (((mant >> 22) & 1u) == 0);
+  const bool is_qnan = is_nan && (((mant >> 22) & 1u) == 1);
+
+  uint32_t res = 0;
+  if (is_inf && sign)
+    res |= (1u << 0);
+  else if (!is_inf && !is_zero && !is_nan && !is_subnormal && sign)
+    res |= (1u << 1);
+  else if (is_subnormal && sign)
+    res |= (1u << 2);
+  else if (is_zero && sign)
+    res |= (1u << 3);
+  else if (is_zero && !sign)
+    res |= (1u << 4);
+  else if (is_subnormal && !sign)
+    res |= (1u << 5);
+  else if (!is_inf && !is_zero && !is_nan && !is_subnormal && !sign)
+    res |= (1u << 6);
+  else if (is_inf && !sign)
+    res |= (1u << 7);
+
+  if (is_snan)
+    res |= (1u << 8);
+  if (is_qnan)
+    res |= (1u << 9);
+  return res;
 }
 } // namespace
 
@@ -117,16 +224,27 @@ void Ref_cpu::init(uint32_t reset_pc, const char *image, uint32_t size) {
   page_fault_store = false;
   state.reserve_valid = false;
   state.reserve_addr = 0;
+  fcsr_fflags = 0;
+  fcsr_frm = 0;
   sim_time = 0;
   difftest_started = false;
 }
 
 void Ref_cpu::exec(const SimConfig &config) {
   // Initialize Spike Reference Simulator if enabled
+#ifdef ENABLE_SPIKE
   if (config.difftest) {
-    spike_ref = std::make_unique<SpikeRef>("RV32IMAB", 0x80000000, 0x80000000,
+    spike_ref = std::make_unique<SpikeRef>("rv32imab_zfinx", 0x80000000, 0x40000000,
                                            config.image_file.c_str());
   }
+#else
+  if (config.difftest) {
+    std::cerr << "[RefCPU] Difftest requested, but this build is compiled "
+                 "without Spike support."
+              << std::endl;
+    exit(1);
+  }
+#endif
 
   // 准备 GEN_CHECKPOINT 需要的 target_intervals
   std::map<uint32_t, uint32_t> target_intervals;
@@ -169,7 +287,12 @@ void Ref_cpu::exec(const SimConfig &config) {
       break;
 
     // Difftest Step
-    if (config.difftest && spike_ref) {
+    if (config.difftest
+#ifdef ENABLE_SPIKE
+        && spike_ref
+#endif
+    ) {
+#ifdef ENABLE_SPIKE
       if (!difftest_started) {
         // DUT starts at 0x0 with some boot code.
         // Spike is configured to start at 0x80000000.
@@ -180,7 +303,87 @@ void Ref_cpu::exec(const SimConfig &config) {
           difftest_started = true;
         }
       } else {
+        processor_t *ref_core = spike_ref->sim->get_core(0);
+        state_t *ref_state_before = ref_core->get_state();
+        uint32_t ref_pc_before = static_cast<uint32_t>(ref_state_before->pc);
+        uint32_t ref_ra_before = static_cast<uint32_t>(ref_state_before->XPR[1]);
+        uint32_t ref_sp_before = static_cast<uint32_t>(ref_state_before->XPR[2]);
+        uint32_t dut_pc_after = state.pc;
+        uint32_t dut_insn_last = Instruction;
+
+        auto fetch_ref_insn = [&](uint32_t pc) -> uint32_t {
+          uint32_t val = 0;
+          try {
+            val = ref_core->get_mmu()->load_insn(pc).insn.bits();
+            return val;
+          } catch (...) {
+          }
+          uint32_t phys_pc = pc;
+          if (pc >= 0xc0000000) {
+            phys_pc = pc - 0xc0000000 + 0x80000000;
+          }
+          if (phys_pc >= 0x80000000 &&
+              (phys_pc - 0x80000000 + 4) <= spike_ref->main_mem_ptr->size()) {
+            uint8_t buf[4];
+            if (spike_ref->main_mem_ptr->load(phys_pc - 0x80000000, 4, buf)) {
+              val = static_cast<uint32_t>(buf[0]) |
+                    (static_cast<uint32_t>(buf[1]) << 8) |
+                    (static_cast<uint32_t>(buf[2]) << 16) |
+                    (static_cast<uint32_t>(buf[3]) << 24);
+            }
+          }
+          return val;
+        };
+        uint32_t ref_insn_before = fetch_ref_insn(ref_pc_before);
+
         spike_ref->step(1);
+
+        state_t *ref_state_after = ref_core->get_state();
+        uint32_t ref_pc_after = static_cast<uint32_t>(ref_state_after->pc);
+        uint32_t ref_mcause = static_cast<uint32_t>(ref_core->get_csr(0x342));
+        uint32_t ref_mepc = static_cast<uint32_t>(ref_core->get_csr(0x341));
+        uint32_t ref_mtvec = static_cast<uint32_t>(ref_core->get_csr(0x305));
+
+        static bool printed_first_ref_fault = false;
+        if (!printed_first_ref_fault && (ref_pc_after == 0 || ref_mcause != 0)) {
+          printed_first_ref_fault = true;
+          uint32_t ref_insn_after = fetch_ref_insn(ref_pc_after);
+          std::cout << "\n[DiffDebug] Spike abnormal step detected\n"
+                    << "  DUT after-step: pc=0x" << std::hex << dut_pc_after
+                    << " last_insn=0x" << dut_insn_last << "\n"
+                    << "  Spike before step: pc=0x" << ref_pc_before
+                    << " insn=0x" << ref_insn_before << " ra=0x" << ref_ra_before
+                    << " sp=0x" << ref_sp_before << "\n"
+                    << "  Spike after  step: pc=0x" << ref_pc_after
+                    << " insn=0x" << ref_insn_after << "\n"
+                    << "  Spike csrs: mepc=0x" << ref_mepc
+                    << " mcause=0x" << ref_mcause << " mtvec=0x" << ref_mtvec
+                    << std::dec << std::endl;
+
+          const uint32_t op = ref_insn_before & 0x7Fu;
+          if (op == 0x03) { // load
+            const uint32_t rs1 = (ref_insn_before >> 15) & 0x1Fu;
+            int32_t imm = static_cast<int32_t>(ref_insn_before) >> 20;
+            uint32_t base = static_cast<uint32_t>(ref_state_before->XPR[rs1]);
+            uint32_t vaddr = static_cast<uint32_t>(base + imm);
+            std::cout << "  Decoded load: rs1=x" << rs1 << " base=0x" << std::hex
+                      << base << " imm=" << std::dec << imm << " vaddr=0x"
+                      << std::hex << vaddr << std::dec << std::endl;
+          } else if (op == 0x23) { // store
+            const uint32_t rs1 = (ref_insn_before >> 15) & 0x1Fu;
+            int32_t imm = static_cast<int32_t>(((ref_insn_before >> 25) << 5) |
+                                               ((ref_insn_before >> 7) & 0x1F));
+            if (imm & 0x800) {
+              imm |= ~0xFFF;
+            }
+            uint32_t base = static_cast<uint32_t>(ref_state_before->XPR[rs1]);
+            uint32_t vaddr = static_cast<uint32_t>(base + imm);
+            std::cout << "  Decoded store: rs1=x" << rs1 << " base=0x" << std::hex
+                      << base << " imm=" << std::dec << imm << " vaddr=0x"
+                      << std::hex << vaddr << std::dec << std::endl;
+          }
+        }
+
         if (is_io) {
           // Surgical sync of the destination register after I/O read
           spike_ref->sync_reg_from_dut(io_reg_idx, state.gpr[io_reg_idx]);
@@ -192,6 +395,7 @@ void Ref_cpu::exec(const SimConfig &config) {
           spike_ref->reg_check(state, privilege);
         }
       }
+#endif
     }
 
     sim_time++;
@@ -648,6 +852,12 @@ void Ref_cpu::RISCV() {
     RV32CSR();
   } else if (opcode == number_11_opcode_lrw) {
     RV32A();
+  } else if (opcode == number_12_opcode_float ||
+             opcode == number_13_opcode_fmadd ||
+             opcode == number_14_opcode_fmsub ||
+             opcode == number_15_opcode_fnmsub ||
+             opcode == number_16_opcode_fnmadd) {
+    RV32Zfinx();
   } else {
     RV32IM();
   }
@@ -676,6 +886,46 @@ void Ref_cpu::RV32CSR() {
     wdata = rs1;
   } else {
     wdata = reg_rdata1;
+  }
+
+  auto apply_csr_op = [&](uint32_t old_val, uint32_t operand) -> uint32_t {
+    if (wcmd == CSR_W) {
+      return operand;
+    }
+    if (wcmd == CSR_S) {
+      return old_val | operand;
+    }
+    return old_val & ~operand;
+  };
+
+  if (csr_addr == number_fflags || csr_addr == number_frm ||
+      csr_addr == number_fcsr) {
+    uint32_t old_val = 0;
+    if (csr_addr == number_fflags) {
+      old_val = fcsr_fflags & 0x1Fu;
+    } else if (csr_addr == number_frm) {
+      old_val = fcsr_frm & 0x7u;
+    } else {
+      old_val = ((fcsr_frm & 0x7u) << 5) | (fcsr_fflags & 0x1Fu);
+    }
+
+    if (re) {
+      state.gpr[rd] = old_val;
+    }
+
+    if (we) {
+      uint32_t new_val = apply_csr_op(old_val, wdata);
+      if (csr_addr == number_fflags) {
+        fcsr_fflags = static_cast<uint8_t>(new_val & 0x1Fu);
+      } else if (csr_addr == number_frm) {
+        fcsr_frm = static_cast<uint8_t>(new_val & 0x7u);
+      } else {
+        fcsr_fflags = static_cast<uint8_t>(new_val & 0x1Fu);
+        fcsr_frm = static_cast<uint8_t>((new_val >> 5) & 0x7u);
+      }
+    }
+    state.pc = next_pc;
+    return;
   }
 
   if (csr_addr != number_mtvec && csr_addr != number_mepc &&
@@ -768,6 +1018,192 @@ void Ref_cpu::RV32CSR() {
     }
   }
 
+  state.pc = next_pc;
+}
+
+void Ref_cpu::RV32Zfinx() {
+  uint32_t next_pc = state.pc + 4;
+
+  uint32_t opcode = Instruction & 0x7Fu;
+  uint32_t rd = (Instruction >> 7) & 0x1Fu;
+  uint32_t funct3 = (Instruction >> 12) & 0x7u;
+  uint32_t rs1 = (Instruction >> 15) & 0x1Fu;
+  uint32_t rs2 = (Instruction >> 20) & 0x1Fu;
+  uint32_t funct7 = (Instruction >> 25) & 0x7Fu;
+  uint32_t rs3 = (Instruction >> 27) & 0x1Fu;
+
+  uint32_t val_rs1 = state.gpr[rs1];
+  uint32_t val_rs2 = state.gpr[rs2];
+  uint32_t val_rs3 = state.gpr[rs3];
+
+  uint8_t rm = static_cast<uint8_t>(funct3);
+  if (rm == 7) {
+    rm = static_cast<uint8_t>(fcsr_frm & 0x7u);
+  }
+
+  switch (rm) {
+  case 0:
+    softfloat_roundingMode = softfloat_round_near_even;
+    break;
+  case 1:
+    softfloat_roundingMode = softfloat_round_minMag;
+    break;
+  case 2:
+    softfloat_roundingMode = softfloat_round_min;
+    break;
+  case 3:
+    softfloat_roundingMode = softfloat_round_max;
+    break;
+  case 4:
+    softfloat_roundingMode = softfloat_round_near_maxMag;
+    break;
+  default:
+    illegal_exception = true;
+    return;
+  }
+
+  softfloat_exceptionFlags = 0;
+
+  float32_t f_rs1 = to_f32(val_rs1);
+  float32_t f_rs2 = to_f32(val_rs2);
+  float32_t f_rs3 = to_f32(val_rs3);
+  float32_t f_res;
+  uint32_t i_res = 0;
+  bool update_fflags = true;
+
+  switch (opcode) {
+  case number_12_opcode_float:
+    switch (funct7) {
+    case 0x00: // FADD.S
+      f_res = f32_add(f_rs1, f_rs2);
+      i_res = from_f32(f_res);
+      break;
+    case 0x04: // FSUB.S
+      f_res = f32_sub(f_rs1, f_rs2);
+      i_res = from_f32(f_res);
+      break;
+    case 0x08: // FMUL.S
+      f_res = f32_mul(f_rs1, f_rs2);
+      i_res = from_f32(f_res);
+      break;
+    case 0x0C: // FDIV.S
+      f_res = f32_div(f_rs1, f_rs2);
+      i_res = from_f32(f_res);
+      break;
+    case 0x2C: // FSQRT.S
+      if (rs2 != 0) {
+        illegal_exception = true;
+        return;
+      }
+      f_res = f32_sqrt(f_rs1);
+      i_res = from_f32(f_res);
+      break;
+    case 0x10: // FSGNJ.S/FSGNJN.S/FSGNJX.S
+      if (funct3 == 0) {
+        i_res = (val_rs1 & ~0x80000000u) | (val_rs2 & 0x80000000u);
+      } else if (funct3 == 1) {
+        i_res = (val_rs1 & ~0x80000000u) | (~val_rs2 & 0x80000000u);
+      } else if (funct3 == 2) {
+        i_res = val_rs1 ^ (val_rs2 & 0x80000000u);
+      } else {
+        illegal_exception = true;
+        return;
+      }
+      update_fflags = false;
+      break;
+    case 0x14: // FMIN.S/FMAX.S
+      if (funct3 == 0) {
+        i_res = f32_min_riscv(val_rs1, val_rs2);
+      } else if (funct3 == 1) {
+        i_res = f32_max_riscv(val_rs1, val_rs2);
+      } else {
+        illegal_exception = true;
+        return;
+      }
+      break;
+    case 0x50: // FEQ.S/FLT.S/FLE.S
+      if (funct3 == 2) {
+        i_res = f32_eq(f_rs1, f_rs2);
+      } else if (funct3 == 1) {
+        i_res = f32_lt(f_rs1, f_rs2);
+      } else if (funct3 == 0) {
+        i_res = f32_le(f_rs1, f_rs2);
+      } else {
+        illegal_exception = true;
+        return;
+      }
+      break;
+    case 0x60: // FCVT.W.S/FCVT.WU.S
+      if (rs2 == 0) {
+        i_res = static_cast<uint32_t>(
+            f32_to_i32(f_rs1, softfloat_roundingMode, true));
+      } else if (rs2 == 1) {
+        i_res = f32_to_ui32(f_rs1, softfloat_roundingMode, true);
+      } else {
+        illegal_exception = true;
+        return;
+      }
+      break;
+    case 0x68: // FCVT.S.W/FCVT.S.WU
+      if (rs2 == 0) {
+        f_res = i32_to_f32(static_cast<int32_t>(val_rs1));
+      } else if (rs2 == 1) {
+        f_res = ui32_to_f32(val_rs1);
+      } else {
+        illegal_exception = true;
+        return;
+      }
+      i_res = from_f32(f_res);
+      break;
+    case 0x70: // FCLASS.S
+      if (funct3 == 1) {
+        i_res = f32_classify_riscv(f_rs1);
+        update_fflags = false;
+      } else {
+        illegal_exception = true;
+        return;
+      }
+      break;
+    default:
+      illegal_exception = true;
+      return;
+    }
+    break;
+  case number_13_opcode_fmadd: // FMADD.S
+    f_res = f32_mulAdd(f_rs1, f_rs2, f_rs3);
+    i_res = from_f32(f_res);
+    break;
+  case number_14_opcode_fmsub: { // FMSUB.S
+    float32_t f_neg_rs3 = to_f32(val_rs3 ^ 0x80000000u);
+    f_res = f32_mulAdd(f_rs1, f_rs2, f_neg_rs3);
+    i_res = from_f32(f_res);
+    break;
+  }
+  case number_15_opcode_fnmsub: { // FNMSUB.S
+    float32_t f_neg_rs1 = to_f32(val_rs1 ^ 0x80000000u);
+    f_res = f32_mulAdd(f_neg_rs1, f_rs2, f_rs3);
+    i_res = from_f32(f_res);
+    break;
+  }
+  case number_16_opcode_fnmadd: { // FNMADD.S
+    float32_t f_neg_rs1 = to_f32(val_rs1 ^ 0x80000000u);
+    float32_t f_neg_rs3 = to_f32(val_rs3 ^ 0x80000000u);
+    f_res = f32_mulAdd(f_neg_rs1, f_rs2, f_neg_rs3);
+    i_res = from_f32(f_res);
+    break;
+  }
+  default:
+    illegal_exception = true;
+    return;
+  }
+
+  if (update_fflags) {
+    fcsr_fflags = static_cast<uint8_t>((fcsr_fflags | softfloat_exceptionFlags) &
+                                       0x1Fu);
+  }
+  if (rd != 0) {
+    state.gpr[rd] = i_res;
+  }
   state.pc = next_pc;
 }
 

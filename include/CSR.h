@@ -6,6 +6,9 @@
 #define CSR_C 0b11
 
 enum enum_number_csr_code {
+  number_fflags = 0x001,
+  number_frm = 0x002,
+  number_fcsr = 0x003,
   number_mtvec = 0x305,
   number_mepc = 0x341,
   number_mcause = 0x342,

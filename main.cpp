@@ -1,7 +1,10 @@
+#ifdef ENABLE_SPIKE
 #include "spike_ref.h"
+#endif
 #include "RISCV.h"
 #include "ref.h"
 #include <cstdlib>
+#include <iostream>
 
 Ref_cpu ref_cpu;
 int main(int argc, char *argv[]) {
@@ -34,8 +37,6 @@ int main(int argc, char *argv[]) {
         config.bbv_output_file = argv[++i];
       else if (arg == "--points")
         config.points_file = argv[++i];
-      else if (arg == "--weights")
-        config.weights_file = argv[++i]; // 虽然 exec 没用到，但可留作校验
       else if (arg == "--ckpt-dir")
         config.checkpoint_dir = argv[++i];
       else if (arg == "--restore-file")
@@ -52,6 +53,14 @@ int main(int argc, char *argv[]) {
     std::cout << "\033[1;33m[Warning] Difftest is only supported in NORMAL mode. Disabling Difftest.\033[0m" << std::endl;
     config.difftest = false;
   }
+
+#ifndef ENABLE_SPIKE
+  if (config.difftest) {
+    std::cout << "\033[1;33m[Warning] This binary is built without Spike support (SPIKE=0). Disabling Difftest.\033[0m"
+              << std::endl;
+    config.difftest = false;
+  }
+#endif
 
   ref_cpu.init(0, config.image_file.c_str(), PHYSICAL_MEMORY_LENGTH);
   ref_cpu.exec(config);

@@ -7,7 +7,9 @@
 #include <unordered_map>
 #include <vector>
 
+#ifdef ENABLE_SPIKE
 class SpikeRef;
+#endif
 
 #define FORCE_INLINE __attribute__((always_inline)) inline
 
@@ -144,7 +146,6 @@ struct SimConfig {
 
   // Mode: GEN_CHECKPOINT
   std::string points_file;    // 输入: SimPoint 生成的 .points 文件
-  std::string weights_file;   // 输入: .weights 文件 (可选，仅用于日志或验证)
   std::string checkpoint_dir; // 输出: Checkpoint 保存目录
 
   // Mode: RESTORE
@@ -206,10 +207,14 @@ public:
   void FORCE_INLINE RV32IM();
   void FORCE_INLINE RV32A();
   void FORCE_INLINE RV32CSR();
+  void FORCE_INLINE RV32Zfinx();
   void exception(uint32_t trap_val);
   void store_data();
   uint32_t load_word(uint32_t addr) const;
   void store_word(uint32_t addr, uint32_t data);
+
+  uint8_t fcsr_fflags = 0;
+  uint8_t fcsr_frm = 0;
 
   const uint64_t INTERVAL_SIZE = 100000000;
   uint64_t interval_inst_count = 0;
@@ -228,6 +233,8 @@ public:
   void save_checkpoint(const std::string &filename);
   void restore_checkpoint(const std::string &filename);
 
+#ifdef ENABLE_SPIKE
   std::unique_ptr<SpikeRef> spike_ref;
+#endif
   bool difftest_started = false;
 };
