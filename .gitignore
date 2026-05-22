@@ -1,5 +1,6 @@
 # Build Artifacts
 a.out
+librefcpu.a
 *.o
 compile_commands.json
 

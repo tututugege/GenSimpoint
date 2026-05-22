@@ -228,6 +228,13 @@ void Ref_cpu::init(uint32_t reset_pc, const char *image, uint32_t size) {
   fcsr_frm = 0;
   sim_time = 0;
   difftest_started = false;
+  sim_end = false;
+  uart_print = false;
+  ref_only = false;
+  dut_pf_check_enable = true;
+  dut_expect_pf_inst = false;
+  dut_expect_pf_load = false;
+  dut_expect_pf_store = false;
 }
 
 void Ref_cpu::exec(const SimConfig &config) {
@@ -740,6 +747,7 @@ void Ref_cpu::RISCV() {
       std::cout << "\033[1;31mTest Failed with code: " << exit_code << "\033[0m"
                 << std::endl;
     }
+    state.pc += 4;
     sim_end = true;
     return;
   }
@@ -828,9 +836,10 @@ void Ref_cpu::RISCV() {
   // WFI 检查 (简单处理)
   if (Instruction == INST_WFI && !asy && !page_fault_inst && !page_fault_load &&
       !page_fault_store) {
-    std::cout << " WFI " << std::endl;
-    std::cout << sim_time << std::endl;
-    exit(1);
+    if (ref_only) {
+      sim_end = true;
+      return;
+    }
   }
 
   if (page_fault_inst) {
@@ -1869,9 +1878,9 @@ void Ref_cpu::store_data() {
   uint32_t write_size =
       (state.store_strb == 0b1) ? 1 : ((state.store_strb == 0b11) ? 2 : 4);
   check_mem_range_or_die("store_data", p_addr, write_size);
-  if (state.store) {
-    state.reserve_valid = false; // Any store (including successful SC)
-                                 // invalidates the reservation
+  if (state.store && state.reserve_valid && state.reserve_addr == p_addr) {
+    // Keep exported state semantics aligned with the old in-tree refcpu.
+    state.reserve_valid = false;
   }
   int offset = p_addr & 0x3;
   uint32_t wstrb = state.store_strb << offset;
@@ -1896,7 +1905,9 @@ void Ref_cpu::store_data() {
     char temp;
     temp = wdata & 0x000000ff;
     store_word(0x10000000, load_word(0x10000000) & 0xffffff00);
-    std::cout << temp;
+    if (uart_print) {
+      std::cout << temp;
+    }
   }
 
   if (p_addr == 0x10000001 && (state.store_data & 0x000000ff) == 7) {
@@ -1918,6 +1929,9 @@ void Ref_cpu::store_data() {
     state.csr[csr_sip] = state.csr[csr_sip] & ~(1 << 9);
     force_sync = true;
   }
+
+  state.store_data = state.store_data << offset * 8;
+  state.store_strb = state.store_strb << offset * 8;
 }
 
 bool Ref_cpu::va2pa(uint32_t &p_addr, uint32_t v_addr, uint32_t type) {

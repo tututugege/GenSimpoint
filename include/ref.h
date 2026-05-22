@@ -199,6 +199,12 @@ public:
   bool is_io;
   int io_reg_idx;
   bool force_sync;
+  bool uart_print = false;
+  bool ref_only = false;
+  bool dut_pf_check_enable = true;
+  bool dut_expect_pf_inst = false;
+  bool dut_expect_pf_load = false;
+  bool dut_expect_pf_store = false;
 
   void init(uint32_t reset_pc, const char *image, uint32_t size);
   void exec(const SimConfig &config);
