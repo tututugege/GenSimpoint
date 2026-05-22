@@ -63,6 +63,7 @@ int main(int argc, char *argv[]) {
 #endif
 
   ref_cpu.init(0, config.image_file.c_str(), PHYSICAL_MEMORY_LENGTH);
+  ref_cpu.uart_print = true;
   ref_cpu.exec(config);
 
   return 0;

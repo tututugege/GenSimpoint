@@ -1,8 +1,10 @@
 CXX = g++
 CXXSRC = $(wildcard *.cpp)
 LIBSRC = exec.cpp simpoint.cpp refcpu_api.cpp
+LIBHDR = $(wildcard include/*.h) $(wildcard include/api/*.h)
 CXXINCLUDE = -I./include -I./include/api -I./lib/include/
 CXXFLAGS = -O3 -march=native -funroll-loops -mtune=native -std=c++20 -flto
+CXXFLAGS += -MMD -MP
 SPIKE ?= 0
 SOFTFLOAT_LIB ?= ./lib/softfloat/softfloat.a
 
@@ -22,19 +24,21 @@ GDB_FLAGS = -g -march=native
 
 TARGET = a.out
 REFCPU_LIB = librefcpu.a
+TARGET_OBJS = $(CXXSRC:.cpp=.o)
 LIBOBJS = $(LIBSRC:.cpp=.o)
+DEPS = $(TARGET_OBJS:.o=.d)
 IMG = ./baremetal/memory
 
 all: $(TARGET)
 
-$(REFCPU_LIB): $(LIBOBJS) $(wildcard include/*.h) $(wildcard include/api/*.h)
+$(REFCPU_LIB): $(LIBOBJS)
 	ar rcs $@ $(LIBOBJS)
 
-%.o: %.cpp
+%.o: %.cpp Makefile $(LIBHDR)
 	$(CXX) $(CXXINCLUDE) $(CXXFLAGS) -c $< -o $@
 
-$(TARGET): $(CXXSRC) $(wildcard include/*.h)
-	$(CXX) $(CXXINCLUDE) $(CXXFLAGS) $(CXXSRC) -o $@ $(LDFLAGS)
+$(TARGET): $(TARGET_OBJS)
+	$(CXX) $(CXXINCLUDE) $(CXXFLAGS) $(TARGET_OBJS) -o $@ $(LDFLAGS)
 
 run: $(TARGET)
 	./$(TARGET) $(IMG)
@@ -50,6 +54,8 @@ gdb: $(CXXSRC)
 	gdb --args ./$(TARGET) $(IMG)
 
 clean:
-	rm -f a.out a.out.nospike $(REFCPU_LIB) *.o
+	rm -f a.out a.out.nospike $(REFCPU_LIB) *.o *.d
+
+-include $(DEPS)
 
 .PHONY: all clean run gdb with_spike no_spike

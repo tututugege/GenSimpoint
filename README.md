@@ -1,6 +1,9 @@
 # RISC-V Full-System Simulator
 
-这是一个轻量级、高性能的 RISC-V 32位全系统模拟器，支持 RV32IMAB + Zfinx 指令集，并集成了基于 Spike 的差异化测试 (Difftest) 以及 SimPoint 分析功能。
+这是一个轻量级、高性能的 RISC-V 32位全系统模拟器，支持 RV32IMAB + Zfinx 指令集，并集成了两类 Difftest 能力：
+
+- standalone 模式下基于 Spike 的 `--diff`
+- 供主模拟器链接使用的 `librefcpu.a` 静态库接口
 
 ---
 
@@ -26,6 +29,7 @@ make no_spike
 说明：
 - `a.out.nospike` 下如果传 `--diff`，会打印 warning 并自动禁用 difftest。
 - `a.out`（with_spike）才会真正执行 Spike difftest。
+- `make -C GenSimpoint librefcpu.a` 会生成给上层主模拟器使用的静态库，不依赖 Spike。
 
 ### 1.1 SoftFloat 说明（no_spike 模式）
 - `SPIKE=0` 时，默认链接仓库内的 `lib/softfloat/softfloat.a`。
@@ -38,6 +42,12 @@ make no_spike
 ./a.out --image path/to/your/image.bin
 ```
 
+当前 standalone 行为：
+- 默认打开 UART 打印。
+- 遇到 `ebreak` 会打印退出码并停止。
+- 遇到可退休的 `wfi` 会直接停止。
+- 访存地址只允许落在 RAM 和已实现 MMIO 白名单中，非法地址会立即报错退出。
+
 ---
 
 ## 🛠️ 参数说明
@@ -46,12 +56,12 @@ make no_spike
 | :--- | :--- | :--- |
 | `--image <file>` | **必选**。指定要加载的二进制镜像文件。 | `--image linux.bin` |
 | `--mode <mode>` | 运行模式选择。可选：`normal`, `bbv`, `ckpt`, `restore`。 | `--mode normal` |
-| `--diff` | 开启 Difftest 模式。与 Spike 逐条指令对比架构状态（**仅在 normal 模式下可用**）。 | `--diff` |
+| `--diff` | 开启 standalone Spike Difftest（**仅在 normal 模式下可用；仅 `SPIKE=1` 构建有效**）。 | `--diff` |
 | `--out-bbv <file>` | 在 `bbv` 模式下，指定产生的 BBV 文件路径。 | `--out-bbv test.bbv` |
 | `--points <file>` | 在 `ckpt` 模式下，指定输入的 SimPoint 结果文件。 | `--points test.points` |
 | `--ckpt-dir <dir>` | 指定保存 Checkpoint 文件的目录。 | `--ckpt-dir ./checkpoint` |
 | `--restore-file <file>`| 指定要恢复的 Checkpoint 文件路径。 | `--restore-file ckpt.gz` |
-| `--max-insts <num>` | 运行的最大指令条数（主要用于 `restore` 模式采样）。 | `--max-insts 100000000` |
+| `--max-insts <num>` | 运行的最大指令条数（当前主要用于 `restore` 模式采样）。 | `--max-insts 100000000` |
 
 ---
 
@@ -73,12 +83,12 @@ make no_spike
 
 ## 🧭 地址空间布局（当前实现）
 
-当前实现采用“**1GB 连续 RAM + 离散 IO word 存储**”的方式：
+当前实现采用“**1GB 连续 RAM + 离散 IO word 存储**”的方式，并对物理地址做严格白名单检查：
 
 ### 1. RAM（连续分配）
 - 物理地址窗口：`0x80000000 - 0xBFFFFFFF`（1GB）
 - 仅该范围使用连续数组分配，用于镜像加载和正常内存访问
-- 超出 `0xBFFFFFFF` 会触发越界错误并退出
+- 超出 `0xBFFFFFFF` 会触发非法访存错误并退出
 
 ### 2. IO / Boot（离散存储）
 - `0x00000000` 附近：启动 stub（启动阶段写入）
@@ -87,12 +97,15 @@ make no_spike
 - `0x10000004`：OpenSBI 兼容寄存器（初始化写 `0x00006000`）
 - `0x0c000000 - 0x0c20ffff`：PLIC（`tree.dts` 对应 `reg size = 0x210000`）
 - `0x0c201004`：PLIC 中断相关寄存器（UART/PLIC 联动逻辑会访问）
-- `0x1fd0e000`：Timer 寄存器（读取返回 `sim_time`）
+- `0x1fd0e000 - 0x1fd0e0ff`：Timer MMIO 窗口
+- `0x1fd0e000`：Timer 低位寄存器（读取返回 `sim_time`）
 - `0x1fd0e004`：Timer 高位寄存器（当前返回 0）
 
 说明：
 - 低地址和外设地址不再占用连续大内存，而是按 `word_addr -> word_data` 离散存储。
 - 读未初始化的离散 IO word 默认返回 `0`。
+- 不在 RAM 或上述 MMIO 白名单内的访存会直接报错，例如：
+  `"[RefCPU] illegal store: addr=0x..., size=... (not in RAM or implemented MMIO)"`
 
 ---
 
@@ -132,9 +145,9 @@ Checkpoint 使用 `zlib gzip`（写模式 `wb1`，文件后缀通常为 `.gz`）
 | PLIC range descriptor (`base,size`) | `0x40002214` | `0x4000221B` | `0x08` |
 | PLIC data (`base=0x0c000000,size=0x210000`) | `0x4000221C` | `0x4021221B` | `0x210000` |
 | TIMER range descriptor (`base,size`) | `0x4021221C` | `0x40212223` | `0x08` |
-| TIMER data (`base=0x1fd0e000,size=0x8`) | `0x40212224` | `0x4021222B` | `0x08` |
+| TIMER data (`base=0x1fd0e000,size=0x100`) | `0x40212224` | `0x40212323` | `0x100` |
 
-总逻辑大小（未压缩）为 `0x4021222C` 字节（`1,075,913,260` 字节）。实际文件大小会因 gzip 压缩而变小。
+总逻辑大小（未压缩）为 `0x40212324` 字节（`1,075,913,508` 字节）。实际文件大小会因 gzip 压缩而变小。
 
 ### 兼容性
 - 当前恢复逻辑只支持新格式（含 `header`、`io_ranges`、`io_data`），不兼容旧格式。
@@ -179,6 +192,16 @@ Checkpoint 使用 `zlib gzip`（写模式 `wb1`，文件后缀通常为 `.gz`）
 - **`reg_check(state, priv)`**: 比对 DUT 传入的状态（PC, GPR, CSR）与 Spike 内部状态。
 - **`sync_state(state, priv)`**: 强制将 DUT 的所有架构上下文同步给 Spike（用于启动和中断对齐）。
 - **`sync_reg_from_dut(idx, val)`**: 手术级同步。仅同步特定的通用寄存器（通常用于 I/O 读取后）。
+
+### 3. `refcpu_api`（供主模拟器链接的静态库接口）
+- 头文件：`include/api/refcpu_api.h`
+- 产物：`librefcpu.a`
+- 典型构建：
+```bash
+make -C GenSimpoint librefcpu.a
+```
+- 这条路径不依赖 Spike；主模拟器只链接静态库，不会触发 standalone `main.cpp`。
+- 作为库使用时，可通过 `refcpu_set_uart_print(ctx, false)` 保持静默。
 
 ---
 

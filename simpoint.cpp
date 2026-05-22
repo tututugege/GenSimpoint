@@ -12,7 +12,6 @@ constexpr uint32_t CKPT_MAGIC = 0x006d6552u; // "Rem\0" (little-endian)
 constexpr uint32_t CKPT_VERSION = 2u;
 constexpr uint32_t BOOT_IO_BASE = 0x00000000u;
 constexpr uint32_t BOOT_IO_SIZE = 0x00002000u;
-constexpr uint32_t LEGACY_TIMER_MMIO_SIZE = 0x8u;
 
 struct CkptHeader {
   uint32_t magic;
@@ -31,7 +30,7 @@ std::vector<CkptIoRange> expected_io_layout() {
       {BOOT_IO_BASE, BOOT_IO_SIZE},
       {UART_BASE, UART_MMIO_SIZE},
       {PLIC_BASE, PLIC_MMIO_SIZE},
-      {TIMER_BASE, LEGACY_TIMER_MMIO_SIZE},
+      {TIMER_BASE, TIMER_MMIO_SIZE},
   };
 }
 

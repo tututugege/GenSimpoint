@@ -20,24 +20,14 @@ namespace {
 constexpr uint32_t kRamBase = 0x80000000u;
 constexpr uint32_t kRamUpperBound = 0xC0000000u;
 constexpr uint32_t kRamSizeBytes = kRamUpperBound - kRamBase;
+constexpr uint32_t kBootIoBase = 0x00000000u;
+constexpr uint32_t kBootIoSize = 0x00002000u;
 
 [[noreturn]] void mem_oob_fatal(const char *op, uint32_t addr, uint32_t size) {
-  std::cerr << "[RefCPU] " << op << " out-of-bounds: addr=0x" << std::hex
-            << addr << ", size=" << std::dec << size
-            << ", required: addr + size <= 0xC0000000" << std::endl;
+  std::cerr << "[RefCPU] illegal " << op << ": addr=0x" << std::hex << addr
+            << ", size=" << std::dec << size
+            << " (not in RAM or implemented MMIO)" << std::endl;
   exit(1);
-}
-
-inline void check_mem_range_or_die(const char *op, uint32_t addr,
-                                   uint32_t size) {
-  if (size == 0) {
-    return;
-  }
-  const uint64_t end =
-      static_cast<uint64_t>(addr) + static_cast<uint64_t>(size) - 1;
-  if (end >= kRamUpperBound) {
-    mem_oob_fatal(op, addr, size);
-  }
 }
 
 inline bool is_ram_range(uint32_t addr, uint32_t size) {
@@ -47,6 +37,39 @@ inline bool is_ram_range(uint32_t addr, uint32_t size) {
   const uint64_t end =
       static_cast<uint64_t>(addr) + static_cast<uint64_t>(size) - 1;
   return end < kRamUpperBound;
+}
+
+inline bool is_mmio_range(uint32_t addr, uint32_t size) {
+  if (size == 0) {
+    return false;
+  }
+
+  const uint64_t end =
+      static_cast<uint64_t>(addr) + static_cast<uint64_t>(size) - 1;
+  const auto in_range = [addr, end](uint32_t base, uint32_t span) {
+    const uint64_t range_end =
+        static_cast<uint64_t>(base) + static_cast<uint64_t>(span) - 1;
+    return addr >= base && end <= range_end;
+  };
+
+  return in_range(kBootIoBase, kBootIoSize) ||
+         in_range(UART_BASE, UART_MMIO_SIZE) ||
+         in_range(PLIC_BASE, PLIC_MMIO_SIZE) ||
+         in_range(TIMER_BASE, TIMER_MMIO_SIZE);
+}
+
+inline bool is_legal_phys_range(uint32_t addr, uint32_t size) {
+  return is_ram_range(addr, size) || is_mmio_range(addr, size);
+}
+
+inline void check_mem_range_or_die(const char *op, uint32_t addr,
+                                   uint32_t size) {
+  if (size == 0) {
+    return;
+  }
+  if (!is_legal_phys_range(addr, size)) {
+    mem_oob_fatal(op, addr, size);
+  }
 }
 
 static inline float32_t to_f32(uint32_t v) {
@@ -836,10 +859,11 @@ void Ref_cpu::RISCV() {
   // WFI 检查 (简单处理)
   if (Instruction == INST_WFI && !asy && !page_fault_inst && !page_fault_load &&
       !page_fault_store) {
-    if (ref_only) {
-      sim_end = true;
-      return;
-    }
+    std::cout << "wfi encountered. stopping simulation at sim_time="
+              << sim_time << std::endl;
+    state.pc += 4;
+    sim_end = true;
+    return;
   }
 
   if (page_fault_inst) {

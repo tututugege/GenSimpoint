@@ -2,6 +2,7 @@
 a.out
 librefcpu.a
 *.o
+*.d
 compile_commands.json
 
 # Simulation Logs

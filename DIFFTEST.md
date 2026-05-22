@@ -1,106 +1,169 @@
-# Difftest 技术文档 (Strict Mode)
+# Difftest 技术文档
 
-本文档详细介绍了模拟器中 **Difftest (差异化测试)** 系统的架构设计、实现细节及使用方法。当前系统已升级至 **Strict Mode (严格模式)**，以确保仿真行为与金标准 (Spike) 的绝对一致。
+本文档说明 `GenSimpoint` 当前支持的两类 Difftest 用法：
 
----
+- standalone 模式下基于 Spike 的 `--diff`
+- 作为上层主模拟器 backend 的 `librefcpu.a`
 
-## 1. 基本原理与机制
-
-### 1.1 Step-and-Check 机制
-Difftest 运行在主仿真循环中，遵循 **"先执行，后比对"** 的原则：
-1. **DUT 执行**：模拟器 (DUT) 执行一条指令，更新内部寄存器和内存。
-2. **Ref 同步执行**：金标准模拟器 (Spike) 通过 `step(1)` 执行相同数量的指令。
-3. **状态比对**：提取两者的架构状态（Architectural State），包括 PC、通用寄存器 (GPR) 和关键控制状态寄存器 (CSR)。
-4. **异常处理**：若比对失败，立即停止仿真并输出详尽的差异报告。
-
-### 1.2 延迟启动策略
-为了避开自定义 Bootloader 段（通常涉及大量机器相关的非标准 I/O 初始化），Difftest 仅在 PC 到达 Payload 入口点（`0x80000000`）时才启动。启动时，DUT 会将其当前的寄存器状态全量同步给 Spike。
+两条路径共享同一个 `Ref_cpu` 执行核心，但集成方式和目标不同。
 
 ---
 
-## 2. 内存空间与隔离架构
+## 1. 总览
 
-为了保证 DUT 的稳定性和 Spike 的纯净性，系统采用了 **物理内存隔离** 方案：
+### 1.1 standalone Spike Difftest
+- 入口：`main.cpp`
+- 运行方式：`./a.out --image your_image.bin --diff`
+- 依赖：需要 `SPIKE=1` 构建出的 `a.out`
+- 作用：让 `GenSimpoint` 自己作为 DUT，与 Spike 逐条比对
 
-*   **隔离设计**：Spike 拥有自己独立的 DRAM 缓冲区（`SpikeMem`），与 DUT 的内存互不干涉。
-*   **防止污染**：Spike 在执行过程中由于缺乏外设逻辑，可能会对 I/O 区域或某些特定地址进行写回。通过隔离，Spike 的任何写操作都不会破坏 DUT 的硬件外设状态或内存。
-*   **同步加载**：在初始化阶段，相同的 `bin` 镜像会被分别加载到 DUT 和 Spike 的独立内存空间中。
-
-| 内存区域 | 基地址 | 长度 | 说明 |
-| :--- | :--- | :--- | :--- |
-| **DRAM (Isolated)** | `0x80000000` | 1GB+ | 每个模拟器各有一份拷贝 |
-| **Boot ROM** | `0x10000` | 4KB | Spike 内部构造的 Boot 段 |
-| **PLIC/UART/Timer** | *多个* | *多个* | 仅 DUT 拥有真实外设状态 |
-
----
-
-## 3. 同步机制：手术级 (Surgical) vs. 全量 (Full)
-
-在“严格模式”下，我们最大限度地减少了状态同步，以暴露 DUT 可能存在的逻辑缺陷：
-
-### 3.1 寄存器手术同步 (Surgical Sync)
-针对 **I/O 读取指令**（如串口读取、计时器值读取）：
-- Spike 并没有真实的外设。当 DUT 读到真实 I/O 数据时，Difftest 会调用 `sync_reg_from_dut`。
-- **操作**：仅将该指令的目标通用寄存器（RD）值从 DUT 拷贝给 Spike。
-- **意义**：允许 Spike 获得正确的外部输入数据，继续后续计算，而无需同步其他状态。
-
-### 3.2 中断与特权级同步 (Full State Sync)
-针对 **中断触发** 或 **CSR 写入**：
-- 当发生外部中断或 DUT 主动修改 `mip/sip` 等关键寄存器时，系统调用 `sync_state`。
-- **操作**：将 DUT 的全部架构寄存器（GPR + 21 个 CSR）全量覆盖到 Spike。
-- **意义**：对齐异常处理的起点，确保两者在处理异步事件时进入相同的特权级。
+### 1.2 静态库 RefCPU Difftest
+- 入口：`include/api/refcpu_api.h`
+- 产物：`librefcpu.a`
+- 依赖：不要求 Spike
+- 作用：让上层主模拟器把 `GenSimpoint` 当作参考模型链接进去
 
 ---
 
-## 4. 严格校验：GPR + 21 个 CSR
+## 2. standalone Spike Difftest
 
-为了捕捉最隐蔽的 Bug，校验逻辑不仅覆盖了通用寄存器，还包含了 DUT 实现的所有 CSR。
+### 2.1 基本流程
+standalone `--diff` 运行在 `Ref_cpu::exec()` 的主循环里，遵循：
 
-### 校验范围
-1. **PC**: 指令流的绝对对齐。
-2. **GPR (x0-x31)**: 计算结果的校验。
-3. **CSR (21个)**: 
-   - **Machine 层**: `mtvec`, `mepc`, `mcause`, `mie`, `mip`, `mtval`, `mscratch`, `mstatus`, `mideleg`, `medeleg`, `mhartid`, `misa`
-   - **Supervisor 层**: `sepc`, `stvec`, `scause`, `sscratch`, `stval`, `sstatus`, `sie`, `sip`, `satp`
+1. `GenSimpoint` 先执行一条指令
+2. Spike 执行一条对应指令
+3. 比较 PC、GPR、CSR 和关键异常信息
+4. 发现不一致时立即停止并报错
 
-### 报错示例 (Bug 追踪)
-系统增加了高亮显示，当检测到差异时会输出：
-```text
-[Difftest Mismatch Detected!]
-CSR Name  Address   Reference (Spike)   DUT (Simulator)
-sstatus   0x100     0x102               0x40102          <-- MISMATCH
+### 2.2 延迟启动
+为绕过早期 boot stub 差异，Spike Difftest 不会从 `pc=0x0` 立即开始，而是在 DUT PC 到达 `0x80000000` 后才启动同步。
+
+### 2.3 构建与运行
+```bash
+# 带 Spike 的 standalone 可执行文件
+make with_spike
+
+# 启用 standalone Spike difftest
+./a.out --image your_image.bin --diff
 ```
-*这曾成功帮助定位了 Spike 内部 `mstatus.SUM` 位无法写入的问题。*
+
+如果当前是 `SPIKE=0` 构建，传 `--diff` 会打印 warning 并自动禁用。
 
 ---
 
-## 5. SpikeRef 类成员说明 (`include/spike_ref.h`)
+## 3. 静态库 RefCPU 接口
 
-### 5.1 主要成员变量
-- `std::unique_ptr<sim_t> sim`: Spike 核心仿真器对象。
-- `std::unique_ptr<cfg_t> cfg`: Spike 配置对象（ISA、内存分布等）。
-- `SpikeMem* main_mem_ptr`: 指向 Spike 独立主存的指针。
+### 3.1 设计目标
+`librefcpu.a` 的目标不是再套一层 Spike，而是提供一个稳定、可嵌入、可控的参考 CPU 接口，供上层主模拟器直接调用。
 
-### 5.2 核心成员函数
-- **`SpikeRef(...)`**: 构造函数。负责初始化 Spike，配置 ISA (如 `RV32IMAB`)，并加载 Binary 镜像。
-- **`step(n)`**: 让 Spike 执行 `n` 条指令。
-- **`reg_check(state, priv)`**: 核心校验函数。对比 DUT 传入的状态与 Spike 当前状态。返回 `false` 时直接退出仿真。
-- **`sync_state(state, priv)`**: 将 DUT 的完整硬件上下文（GPR + 21 CSRs）强行同步到 Spike。
-- **`sync_reg_from_dut(idx, val)`**: 将 DUT 的第 `idx` 个通用寄存器值设置为 `val`。
+这条路径的关键点：
+- 不依赖 Spike
+- 不走 standalone `main.cpp`
+- 默认不打印 UART
+- 上层可以直接读写 RAM、IO、架构状态
+
+### 3.2 头文件与产物
+- API 头文件：`include/api/refcpu_api.h`
+- 静态库：`librefcpu.a`
+
+构建方式：
+```bash
+make -C GenSimpoint librefcpu.a
+```
+
+### 3.3 常用接口
+- `refcpu_init(reset_pc, ram_size_bytes)`: 创建上下文并分配 RAM
+- `refcpu_destroy(ctx)`: 销毁上下文
+- `refcpu_step(ctx, steps)`: 执行若干条指令
+- `refcpu_get_state / refcpu_set_state`: 读写架构状态
+- `refcpu_sync_ram_from_dut`: 从上层同步 RAM 内容
+- `refcpu_load_word / refcpu_store_word`: 直接访问参考模型内存/IO
+- `refcpu_set_uart_print(ctx, enable)`: 控制 UART 打印
+- `refcpu_set_ref_only(ctx, enable)`: 控制某些参考模型专用行为
 
 ---
 
-## 6. 使用与调试
+## 4. 共享执行语义
 
-1. **编译**: 确保 `libriscv` 已正确安装，直接 `make`。
-2. **启动**: 使用 `--diff` 参数开启。
-   ```bash
-   ./a.out --image your_image.bin --diff
-   ```
-3. **拦截**: 仿真一旦报错（Exit code 1），请根据输出的红色 `MISMATCH` 标签定位出错位置。
-   - **通用寄存器错**：通常是上条指令计算逻辑 (ALU/Memory) 错误。
-   - **PC 错**：通常是分支预测、跳转指令或异常跳转逻辑错误。
-   - **CSR 错**：通常是特权指令、掩码 (Mask) 处理或中断屏蔽逻辑错误。
+无论是 standalone 还是静态库，底层都使用同一个 `Ref_cpu`，因此以下行为一致：
+
+- RAM 窗口固定为 `0x80000000 .. 0xbfffffff`（1GB）
+- Boot/UART/PLIC/Timer 使用离散 `io_words` 存储
+- 物理地址访问采用严格白名单检查
+- 遇到 `ebreak` 会退出
+- 遇到可退休的 `wfi` 会退出
+
+其中物理地址白名单当前为：
+- Boot IO: `0x00000000 .. 0x00001fff`
+- UART: `0x10000000 .. 0x100000ff`
+- PLIC: `0x0c000000 .. 0x0c20ffff`
+- Timer: `0x1fd0e000 .. 0x1fd0e0ff`
+- RAM: `0x80000000 .. 0xbfffffff`
+
+任何不在白名单内的访存都会直接报错，例如：
+```text
+[RefCPU] illegal store: addr=0xc03fdea0, size=4 (not in RAM or implemented MMIO)
+```
 
 ---
-*文档版本: v2.0 (Strict Sync Support)*
+
+## 5. standalone 与静态库的差异
+
+### 5.1 UART 输出
+- standalone：默认打开 UART 打印
+- 静态库：默认关闭 UART 打印
+
+原因是 standalone 需要可见的控制台输出，而上层主模拟器 difftest 通常要求参考模型保持静默。
+
+### 5.2 入口差异
+- standalone 通过 `main.cpp` 做命令行解析，再调用 `Ref_cpu::exec()`
+- 静态库由上层自己驱动 `refcpu_*` API，不经过 `main.cpp`
+
+### 5.3 停止条件
+- standalone 常见停止条件：`ebreak`、`wfi`、非法访存、超时
+- 静态库常见停止条件：上层停止调用 `refcpu_step()`，或参考模型内部触发 `sim_end`
+
+---
+
+## 6. 依赖与构建注意事项
+
+`GenSimpoint/Makefile` 现在为 `.o` 自动生成并包含 `.d` 依赖文件，因此：
+
+- 修改 `include/*.h` 或 `include/api/*.h` 后会自动触发相关目标重编
+- `make librefcpu.a` 不再依赖手动删 `.o`
+
+常用命令：
+```bash
+# 构建 standalone
+make -C GenSimpoint
+
+# 构建静态库
+make -C GenSimpoint librefcpu.a
+
+# 清理
+make -C GenSimpoint clean
+```
+
+---
+
+## 7. 推荐使用方式
+
+### 7.1 调试 `GenSimpoint` 自身
+使用 standalone：
+```bash
+./a.out --image your_image.bin
+```
+
+如果要对 Spike：
+```bash
+./a.out --image your_image.bin --diff
+```
+
+### 7.2 作为主模拟器参考模型
+优先使用静态库：
+```bash
+make -C GenSimpoint librefcpu.a
+make -j4
+```
+
+这样主模拟器只维护一套参考模型代码路径，不再维护单独的 in-tree refcpu 副本。
