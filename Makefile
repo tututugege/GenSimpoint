@@ -1,9 +1,10 @@
 CXX = g++
+AR ?= gcc-ar
 CXXSRC = $(wildcard *.cpp)
 LIBSRC = exec.cpp simpoint.cpp refcpu_api.cpp
 LIBHDR = $(wildcard include/*.h) $(wildcard include/api/*.h)
 CXXINCLUDE = -I./include -I./include/api -I./lib/include/
-CXXFLAGS = -O3 -march=native -funroll-loops -mtune=native -std=c++20 -flto
+CXXFLAGS = -O3 -march=native -funroll-loops -mtune=native -std=c++2a -flto
 CXXFLAGS += -MMD -MP
 SPIKE ?= 0
 SOFTFLOAT_LIB ?= ./lib/softfloat/softfloat.a
@@ -32,7 +33,7 @@ IMG = ./baremetal/memory
 all: $(TARGET)
 
 $(REFCPU_LIB): $(LIBOBJS)
-	ar rcs $@ $(LIBOBJS)
+	$(AR) rcs $@ $(LIBOBJS)
 
 %.o: %.cpp Makefile $(LIBHDR)
 	$(CXX) $(CXXINCLUDE) $(CXXFLAGS) -c $< -o $@
