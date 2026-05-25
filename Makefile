@@ -1,5 +1,5 @@
 CXX = g++
-AR ?= gcc-ar
+AR = gcc-ar
 CXXSRC = $(wildcard *.cpp)
 LIBSRC = exec.cpp simpoint.cpp refcpu_api.cpp
 LIBHDR = $(wildcard include/*.h) $(wildcard include/api/*.h)
