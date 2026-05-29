@@ -24,10 +24,10 @@ constexpr uint32_t kBootIoBase = 0x00000000u;
 constexpr uint32_t kBootIoSize = 0x00002000u;
 
 [[noreturn]] void mem_oob_fatal(const char *op, uint32_t addr, uint32_t size) {
-  std::cerr << "[RefCPU] illegal " << op << ": addr=0x" << std::hex << addr
-            << ", size=" << std::dec << size
-            << " (not in RAM or implemented MMIO)" << std::endl;
-  exit(1);
+  std::cerr << "[RefCPU] illegal " << op << " at paddr=0x" << std::hex << addr
+            << " size=0x" << size << " (not in RAM or implemented MMIO)"
+            << std::dec << std::endl;
+  std::exit(1);
 }
 
 inline bool is_ram_range(uint32_t addr, uint32_t size) {
@@ -55,6 +55,7 @@ inline bool is_mmio_range(uint32_t addr, uint32_t size) {
   return in_range(kBootIoBase, kBootIoSize) ||
          in_range(UART_BASE, UART_MMIO_SIZE) ||
          in_range(PLIC_BASE, PLIC_MMIO_SIZE) ||
+         in_range(XPS_INTC_BASE, XPS_INTC_MMIO_SIZE) ||
          in_range(TIMER_BASE, TIMER_MMIO_SIZE);
 }
 
@@ -62,7 +63,7 @@ inline bool is_legal_phys_range(uint32_t addr, uint32_t size) {
   return is_ram_range(addr, size) || is_mmio_range(addr, size);
 }
 
-inline void check_mem_range_or_die(const char *op, uint32_t addr,
+inline void check_mem_range_or_log(const char *op, uint32_t addr,
                                    uint32_t size) {
   if (size == 0) {
     return;
@@ -214,7 +215,7 @@ void Ref_cpu::init(uint32_t reset_pc, const char *image, uint32_t size) {
     exit(1);
   }
   const uint32_t img_bytes = static_cast<uint32_t>(img_size);
-  check_mem_range_or_die("image load", kRamBase, img_bytes);
+  check_mem_range_or_log("image load", kRamBase, img_bytes);
 
   std::cout << "[RefCPU] Loading image at 0x80000000, size: " << img_size
             << " bytes" << std::endl;
@@ -756,7 +757,7 @@ void Ref_cpu::RISCV() {
       return;
     }
   }
-  check_mem_range_or_die("instruction fetch", p_addr, 4);
+  check_mem_range_or_log("instruction fetch", p_addr, 4);
   Instruction = load_word(p_addr);
 
   if (Instruction == INST_EBREAK) {
@@ -1283,7 +1284,7 @@ void Ref_cpu::RV32A() {
       return;
     }
   }
-  check_mem_range_or_die("amo", p_addr, 4);
+  check_mem_range_or_log("amo", p_addr, 4);
 
   if (funct5 != 2) {
     state.store = true;
@@ -1484,7 +1485,7 @@ void Ref_cpu::RV32IM() {
       return;
 
     } else {
-      check_mem_range_or_die("load", p_addr, access_size);
+      check_mem_range_or_log("load", p_addr, access_size);
       uint32_t data = load_word(p_addr);
       uint32_t offset = p_addr & 0b11;
       uint32_t size = funct3 & 0b11;
@@ -1541,7 +1542,7 @@ void Ref_cpu::RV32IM() {
       exception(v_addr);
       return;
     } else {
-      check_mem_range_or_die("store", p_addr, access_size);
+      check_mem_range_or_log("store", p_addr, access_size);
 
       state.store = true;
       state.store_addr = p_addr;
@@ -1881,7 +1882,7 @@ uint32_t Ref_cpu::load_word(uint32_t addr) const {
     return memory[(word_addr - kRamBase) >> 2];
   }
 
-  check_mem_range_or_die("word load", word_addr, 4);
+  check_mem_range_or_log("word load", word_addr, 4);
   auto it = io_words.find(word_addr);
   return (it == io_words.end()) ? 0 : it->second;
 }
@@ -1893,7 +1894,7 @@ void Ref_cpu::store_word(uint32_t addr, uint32_t data) {
     return;
   }
 
-  check_mem_range_or_die("word store", word_addr, 4);
+  check_mem_range_or_log("word store", word_addr, 4);
   io_words[word_addr] = data;
 }
 
@@ -1901,7 +1902,7 @@ void Ref_cpu::store_data() {
   uint32_t p_addr = state.store_addr;
   uint32_t write_size =
       (state.store_strb == 0b1) ? 1 : ((state.store_strb == 0b11) ? 2 : 4);
-  check_mem_range_or_die("store_data", p_addr, write_size);
+  check_mem_range_or_log("store_data", p_addr, write_size);
   if (state.store && state.reserve_valid && state.reserve_addr == p_addr) {
     // Keep exported state semantics aligned with the old in-tree refcpu.
     state.reserve_valid = false;
@@ -1986,7 +1987,7 @@ bool Ref_cpu::va2pa(uint32_t &p_addr, uint32_t v_addr, uint32_t type) {
   uint32_t pte1_addr = (ppn_root << 12) | (vpn1 << 2);
 
   // 直接读取，注意这里需要确保 memory 是按字寻址还是字节寻址
-  check_mem_range_or_die("ptw-l1", pte1_addr, 4);
+  check_mem_range_or_log("ptw-l1", pte1_addr, 4);
   uint32_t pte1 = load_word(pte1_addr);
 
   // 3. 检查 PTE 有效性
@@ -2042,7 +2043,7 @@ bool Ref_cpu::va2pa(uint32_t &p_addr, uint32_t v_addr, uint32_t type) {
   uint32_t vpn0 = (v_addr >> 12) & 0x3FF;
   uint32_t pte2_addr = (ppn1 << 12) | (vpn0 << 2);
 
-  check_mem_range_or_die("ptw-l2", pte2_addr, 4);
+  check_mem_range_or_log("ptw-l2", pte2_addr, 4);
   uint32_t pte2 = load_word(pte2_addr);
 
   // 重复有效性检查

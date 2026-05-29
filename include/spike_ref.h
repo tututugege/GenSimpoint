@@ -36,6 +36,7 @@ public:
   // directly
   abstract_mem_t *main_mem_ptr;
   abstract_mem_t *plic_mem_ptr;
+  abstract_mem_t *xps_intc_mem_ptr;
   abstract_mem_t *uart_mem_ptr;
   abstract_mem_t *timer_mem_ptr;
   abstract_mem_t *boot_mem_ptr;
@@ -63,6 +64,8 @@ public:
 
     main_mem_ptr = new SpikeMem(ram_size);
     plic_mem_ptr = new mem_t(align_up_4k(PLIC_MMIO_SIZE)); // PLIC area from DTB
+    xps_intc_mem_ptr =
+        new mem_t(align_up_4k(XPS_INTC_MMIO_SIZE)); // XPS INTC area from DTB
     uart_mem_ptr = new mem_t(align_up_4k(UART_MMIO_SIZE)); // UART area from DTB
     timer_mem_ptr = new mem_t(align_up_4k(0x1000)); // Timer area
     boot_mem_ptr = new mem_t(0x1000); // Boot ROM at 0x1000
@@ -89,6 +92,7 @@ public:
     std::vector<std::pair<reg_t, abstract_mem_t *>> mems;
     mems.push_back(std::make_pair(ram_base, main_mem_ptr));
     mems.push_back(std::make_pair(PLIC_BASE, plic_mem_ptr));
+    mems.push_back(std::make_pair(XPS_INTC_BASE, xps_intc_mem_ptr));
     mems.push_back(std::make_pair(UART_BASE, uart_mem_ptr));
     mems.push_back(std::make_pair(TIMER_BASE, timer_mem_ptr));
     mems.push_back(std::make_pair(0x1000, boot_mem_ptr));
