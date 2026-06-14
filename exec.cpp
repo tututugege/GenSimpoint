@@ -58,7 +58,8 @@ inline bool is_mmio_range(uint32_t addr, uint32_t size) {
          in_range(UART_BASE, UART_MMIO_SIZE) ||
          in_range(PLIC_BASE, PLIC_MMIO_SIZE) ||
          in_range(XPS_INTC_BASE, XPS_INTC_MMIO_SIZE) ||
-         in_range(TIMER_BASE, TIMER_MMIO_SIZE);
+         in_range(TIMER_BASE, TIMER_MMIO_SIZE) ||
+         in_range(DMA_BASE, DMA_MMIO_SIZE);
 }
 
 inline bool is_legal_phys_range(uint32_t addr, uint32_t size) {
@@ -2038,8 +2039,8 @@ void Ref_cpu::store_data() {
     store_word(0xc201004, 0xa);
     store_word(0x10000000, load_word(0x10000000) & 0xfff0ffff);
 
-    state.csr[csr_mip] = state.csr[csr_mip] | (1 << 9);
-    state.csr[csr_sip] = state.csr[csr_sip] | (1 << 9);
+    state.csr[csr_mip] = state.csr[csr_mip] | MIP_MEIP;
+    state.csr[csr_sip] = state.csr[csr_mip] & 0x00000333u;
     force_sync = true;
   }
 
@@ -2051,8 +2052,8 @@ void Ref_cpu::store_data() {
   if (device_effects_enable && p_addr == 0xc201004 &&
       (state.store_data & 0x000000ff) == 0xa) {
     store_word(0xc201004, 0x0);
-    state.csr[csr_mip] = state.csr[csr_mip] & ~(1 << 9);
-    state.csr[csr_sip] = state.csr[csr_sip] & ~(1 << 9);
+    state.csr[csr_mip] = state.csr[csr_mip] & ~MIP_MEIP;
+    state.csr[csr_sip] = state.csr[csr_mip] & 0x00000333u;
     force_sync = true;
   }
 

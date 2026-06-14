@@ -147,6 +147,24 @@ void refcpu_sync_ram_from_dut(RefCpuContext *ctx, const uint32_t *ram_src,
   std::memcpy(ctx->cpu.memory, ram_src, bytes);
 }
 
+void refcpu_sync_ram_range_from_dut(RefCpuContext *ctx, uint32_t ram_paddr,
+                                    const void *src, size_t size_bytes) {
+  if (ctx == nullptr || src == nullptr || ctx->cpu.memory == nullptr ||
+      size_bytes == 0) {
+    return;
+  }
+  if (ram_paddr < 0x80000000u) {
+    return;
+  }
+  const size_t off = static_cast<size_t>(ram_paddr - 0x80000000u);
+  const size_t limit = static_cast<size_t>(ctx->cpu.ram_size);
+  if (off >= limit) {
+    return;
+  }
+  const size_t bytes = std::min(size_bytes, limit - off);
+  std::memcpy(reinterpret_cast<uint8_t *>(ctx->cpu.memory) + off, src, bytes);
+}
+
 uint32_t *refcpu_get_ram_ptr(RefCpuContext *ctx) {
   return ctx == nullptr ? nullptr : ctx->cpu.memory;
 }

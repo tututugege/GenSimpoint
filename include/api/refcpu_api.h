@@ -53,6 +53,8 @@ void refcpu_sync_gprs_from_dut(RefCpuContext *ctx, const uint32_t *gpr,
 
 void refcpu_sync_ram_from_dut(RefCpuContext *ctx, const uint32_t *ram_src,
                               size_t size_bytes);
+void refcpu_sync_ram_range_from_dut(RefCpuContext *ctx, uint32_t ram_paddr,
+                                    const void *src, size_t size_bytes);
 uint32_t *refcpu_get_ram_ptr(RefCpuContext *ctx);
 uint32_t refcpu_load_word(const RefCpuContext *ctx, uint32_t addr);
 void refcpu_store_word(RefCpuContext *ctx, uint32_t addr, uint32_t data);
