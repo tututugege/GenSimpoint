@@ -201,6 +201,7 @@ public:
   bool force_sync;
   bool uart_print = false;
   bool ref_only = false;
+  bool device_effects_enable = true;
   bool dut_pf_check_enable = true;
   bool dut_expect_pf_inst = false;
   bool dut_expect_pf_load = false;
@@ -218,6 +219,8 @@ public:
   void store_data();
   uint32_t load_word(uint32_t addr) const;
   void store_word(uint32_t addr, uint32_t data);
+  uint32_t visible_mip() const;
+  uint32_t visible_sip() const;
 
   uint8_t fcsr_fflags = 0;
   uint8_t fcsr_frm = 0;

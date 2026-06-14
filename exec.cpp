@@ -22,6 +22,8 @@ constexpr uint32_t kRamUpperBound = 0xC0000000u;
 constexpr uint32_t kRamSizeBytes = kRamUpperBound - kRamBase;
 constexpr uint32_t kBootIoBase = 0x00000000u;
 constexpr uint32_t kBootIoSize = 0x00002000u;
+static uint64_t g_ref_timer_offset = 0;
+static uint64_t g_ref_timer_cmp = 0;
 
 [[noreturn]] void mem_oob_fatal(const char *op, uint32_t addr, uint32_t size) {
   std::cerr << "[RefCPU] illegal " << op << " at paddr=0x" << std::hex << addr
@@ -77,6 +79,30 @@ static inline float32_t to_f32(uint32_t v) {
   float32_t f;
   f.v = v;
   return f;
+}
+
+static inline uint32_t ref_effective_mip(uint32_t mip_reg, uint32_t now,
+                                         bool device_effects_enable) {
+  if (device_effects_enable &&
+      (static_cast<uint64_t>(now) + g_ref_timer_offset) >= g_ref_timer_cmp) {
+    return mip_reg | MIP_MTIP;
+  }
+  return mip_reg & ~MIP_MTIP;
+}
+
+static inline void sync_timer_csrs(CPU_state &state, uint32_t now,
+                                   bool device_effects_enable) {
+  state.csr[csr_mip] =
+      ref_effective_mip(state.csr[csr_mip], now, device_effects_enable);
+  state.csr[csr_sip] = state.csr[csr_mip] & 0x00000333u;
+}
+
+static inline uint64_t ref_timer_now(uint32_t now) {
+  return static_cast<uint64_t>(now) + g_ref_timer_offset;
+}
+
+static inline void ref_write_timer_value(uint64_t value, uint32_t now) {
+  g_ref_timer_offset = value - static_cast<uint64_t>(now);
 }
 
 static inline uint32_t from_f32(float32_t f) { return f.v; }
@@ -172,6 +198,15 @@ static inline uint32_t f32_classify_riscv(float32_t f) {
 }
 } // namespace
 
+uint32_t Ref_cpu::visible_mip() const {
+  return ref_effective_mip(state.csr[csr_mip], static_cast<uint32_t>(sim_time),
+                           device_effects_enable);
+}
+
+uint32_t Ref_cpu::visible_sip() const {
+  return visible_mip() & 0x00000333u;
+}
+
 std::map<uint32_t, uint32_t> load_simpoints(const std::string &filename);
 
 Ref_cpu::~Ref_cpu() {
@@ -182,6 +217,8 @@ Ref_cpu::~Ref_cpu() {
 
 void Ref_cpu::init(uint32_t reset_pc, const char *image, uint32_t size) {
   state.pc = reset_pc;
+  g_ref_timer_offset = 0;
+  g_ref_timer_cmp = 0;
   ram_size = size;
   if (ram_size != kRamSizeBytes) {
     std::cerr << "[RefCPU] Unsupported RAM size: 0x" << std::hex << ram_size
@@ -733,6 +770,8 @@ void Ref_cpu::exception(uint32_t trap_val) {
 }
 
 void Ref_cpu::RISCV() {
+  sync_timer_csrs(state, static_cast<uint32_t>(sim_time),
+                  device_effects_enable);
   if (privilege == RISCV_MODE_U) {
     if (current_bb_len == 0) {
       current_bb_head_pc = state.pc;
@@ -787,7 +826,9 @@ void Ref_cpu::RISCV() {
   // === 优化 2: 快速读取 CSR 状态 ===
   uint32_t mstatus = state.csr[csr_mstatus];
   uint32_t mie_reg = state.csr[csr_mie];
-  uint32_t mip_reg = state.csr[csr_mip];
+  uint32_t mip_reg = ref_effective_mip(state.csr[csr_mip],
+                                       static_cast<uint32_t>(sim_time),
+                                       device_effects_enable);
   uint32_t mideleg = state.csr[csr_mideleg];
   uint32_t medeleg = state.csr[csr_medeleg];
 
@@ -972,7 +1013,8 @@ void Ref_cpu::RV32CSR() {
       csr_addr != number_stval && csr_addr != number_sstatus &&
       csr_addr != number_sie && csr_addr != number_sip &&
       csr_addr != number_satp && csr_addr != number_mhartid &&
-      csr_addr != number_misa && csr_addr != number_time &&
+      csr_addr != number_misa &&
+      csr_addr != number_time &&
       csr_addr != number_timeh) {
     ;
   } else if (csr_addr == number_time || csr_addr == number_timeh) {
@@ -983,11 +1025,35 @@ void Ref_cpu::RV32CSR() {
 
     int csr_idx = cvt_number_to_csr(csr_addr);
     if (re) {
-      state.gpr[rd] = state.csr[csr_idx];
+      if (csr_addr == number_mip) {
+        state.gpr[rd] = ref_effective_mip(state.csr[csr_mip],
+                                          static_cast<uint32_t>(sim_time),
+                                          device_effects_enable);
+      } else if (csr_addr == number_sip) {
+        state.gpr[rd] =
+            ref_effective_mip(state.csr[csr_mip],
+                              static_cast<uint32_t>(sim_time),
+                              device_effects_enable) &
+            0x00000333u;
+      } else {
+        state.gpr[rd] = state.csr[csr_idx];
+      }
     }
 
     if (we) {
-      uint32_t old_val = state.csr[csr_idx];
+      uint32_t old_val = 0;
+      if (csr_addr == number_mip) {
+        old_val = ref_effective_mip(state.csr[csr_mip],
+                                    static_cast<uint32_t>(sim_time),
+                                    device_effects_enable);
+      } else if (csr_addr == number_sip) {
+        old_val = ref_effective_mip(state.csr[csr_mip],
+                                    static_cast<uint32_t>(sim_time),
+                                    device_effects_enable) &
+                  0x00000333u;
+      } else {
+        old_val = state.csr[csr_idx];
+      }
       if (wcmd == CSR_W) {
         csr_wdata = wdata;
       } else if (wcmd == CSR_S) {
@@ -1510,11 +1576,17 @@ void Ref_cpu::RV32IM() {
         data = data | sign;
       }
 
-      if (p_addr == 0x1fd0e000) {
-        data = sim_time;
+      if (device_effects_enable && p_addr == TIMER_BASE) {
+        data = static_cast<uint32_t>(ref_timer_now(static_cast<uint32_t>(sim_time)));
       }
-      if (p_addr == 0x1fd0e004) {
-        data = 0;
+      if (device_effects_enable && p_addr == (TIMER_BASE + 4u)) {
+        data = static_cast<uint32_t>(ref_timer_now(static_cast<uint32_t>(sim_time)) >> 32);
+      }
+      if (device_effects_enable && p_addr == (TIMER_BASE + 8u)) {
+        data = static_cast<uint32_t>(g_ref_timer_cmp);
+      }
+      if (device_effects_enable && p_addr == (TIMER_BASE + 12u)) {
+        data = static_cast<uint32_t>(g_ref_timer_cmp >> 32);
       }
 
       state.gpr[reg_d_index] = data;
@@ -1889,6 +1961,32 @@ uint32_t Ref_cpu::load_word(uint32_t addr) const {
 
 void Ref_cpu::store_word(uint32_t addr, uint32_t data) {
   const uint32_t word_addr = addr & ~0x3u;
+  if (device_effects_enable && word_addr == TIMER_BASE) {
+    const uint32_t now = static_cast<uint32_t>(sim_time);
+    const uint64_t current = ref_timer_now(now);
+    ref_write_timer_value((current & 0xFFFFFFFF00000000ull) |
+                              static_cast<uint64_t>(data),
+                          now);
+    return;
+  }
+  if (device_effects_enable && word_addr == (TIMER_BASE + 4u)) {
+    const uint32_t now = static_cast<uint32_t>(sim_time);
+    const uint64_t current = ref_timer_now(now);
+    ref_write_timer_value((static_cast<uint64_t>(data) << 32) |
+                              (current & 0x00000000FFFFFFFFull),
+                          now);
+    return;
+  }
+  if (device_effects_enable && word_addr == (TIMER_BASE + 8u)) {
+    g_ref_timer_cmp = (g_ref_timer_cmp & 0xFFFFFFFF00000000ull) |
+                      static_cast<uint64_t>(data);
+    return;
+  }
+  if (device_effects_enable && word_addr == (TIMER_BASE + 12u)) {
+    g_ref_timer_cmp = (static_cast<uint64_t>(data) << 32) |
+                      (g_ref_timer_cmp & 0x00000000FFFFFFFFull);
+    return;
+  }
   if (is_ram_range(word_addr, 4)) {
     memory[(word_addr - kRamBase) >> 2] = data;
     return;
@@ -1926,7 +2024,7 @@ void Ref_cpu::store_data() {
     store_word(p_addr, (mask & wdata) | (~mask & old_data));
   }
 
-  if (p_addr == UART_BASE) {
+  if (device_effects_enable && p_addr == UART_BASE) {
     char temp;
     temp = wdata & 0x000000ff;
     store_word(0x10000000, load_word(0x10000000) & 0xffffff00);
@@ -1935,7 +2033,8 @@ void Ref_cpu::store_data() {
     }
   }
 
-  if (p_addr == 0x10000001 && (state.store_data & 0x000000ff) == 7) {
+  if (device_effects_enable && p_addr == 0x10000001 &&
+      (state.store_data & 0x000000ff) == 7) {
     store_word(0xc201004, 0xa);
     store_word(0x10000000, load_word(0x10000000) & 0xfff0ffff);
 
@@ -1944,11 +2043,13 @@ void Ref_cpu::store_data() {
     force_sync = true;
   }
 
-  if (p_addr == 0x10000001 && (state.store_data & 0x000000ff) == 5) {
+  if (device_effects_enable && p_addr == 0x10000001 &&
+      (state.store_data & 0x000000ff) == 5) {
     store_word(0x10000000, (load_word(0x10000000) & 0xfff0ffff) | 0x00030000);
   }
 
-  if (p_addr == 0xc201004 && (state.store_data & 0x000000ff) == 0xa) {
+  if (device_effects_enable && p_addr == 0xc201004 &&
+      (state.store_data & 0x000000ff) == 0xa) {
     store_word(0xc201004, 0x0);
     state.csr[csr_mip] = state.csr[csr_mip] & ~(1 << 9);
     state.csr[csr_sip] = state.csr[csr_sip] & ~(1 << 9);

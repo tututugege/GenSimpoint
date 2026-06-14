@@ -63,6 +63,8 @@ uint32_t refcpu_get_io_word(const RefCpuContext *ctx, uint32_t addr);
 
 void refcpu_set_uart_print(RefCpuContext *ctx, bool enable);
 void refcpu_set_ref_only(RefCpuContext *ctx, bool enable);
+void refcpu_set_device_effects(RefCpuContext *ctx, bool enable);
 void refcpu_set_sim_end(RefCpuContext *ctx, bool value);
+void refcpu_set_sim_time(RefCpuContext *ctx, uint64_t sim_time);
 
 bool refcpu_probe_pc_translation(RefCpuContext *ctx);

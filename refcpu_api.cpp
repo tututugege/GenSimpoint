@@ -21,6 +21,8 @@ RefCpuState export_state(const Ref_cpu &cpu) {
   RefCpuState state{};
   std::memcpy(state.gpr, cpu.state.gpr, sizeof(state.gpr));
   std::memcpy(state.csr, cpu.state.csr, sizeof(state.csr));
+  state.csr[csr_mip] = cpu.visible_mip();
+  state.csr[csr_sip] = cpu.visible_sip();
   state.pc = cpu.state.pc;
   state.store_addr = cpu.state.store_addr;
   state.store_data = cpu.state.store_data;
@@ -66,6 +68,7 @@ RefCpuContext *refcpu_init(uint32_t reset_pc, uint32_t ram_size_bytes) {
   ctx->cfg.ram_size = ram_size_bytes;
   ctx->cpu.init(reset_pc, kInitImage, ram_size_bytes);
   ctx->cpu.sim_end = false;
+  ctx->cpu.device_effects_enable = false;
   return ctx;
 }
 
@@ -191,11 +194,25 @@ void refcpu_set_ref_only(RefCpuContext *ctx, bool enable) {
   ctx->cpu.ref_only = enable;
 }
 
+void refcpu_set_device_effects(RefCpuContext *ctx, bool enable) {
+  if (ctx == nullptr) {
+    return;
+  }
+  ctx->cpu.device_effects_enable = enable;
+}
+
 void refcpu_set_sim_end(RefCpuContext *ctx, bool value) {
   if (ctx == nullptr) {
     return;
   }
   ctx->cpu.sim_end = value;
+}
+
+void refcpu_set_sim_time(RefCpuContext *ctx, uint64_t sim_time) {
+  if (ctx == nullptr) {
+    return;
+  }
+  ctx->cpu.sim_time = sim_time;
 }
 
 bool refcpu_probe_pc_translation(RefCpuContext *ctx) {
