@@ -17,6 +17,11 @@ struct RefCpuContextImpl {
   SimConfig cfg;
 };
 
+void suppress_timer_pending(Ref_cpu &cpu) {
+  cpu.state.csr[csr_mip] &= ~MIP_MTIP;
+  cpu.state.csr[csr_sip] = cpu.state.csr[csr_mip] & 0x00000333u;
+}
+
 RefCpuState export_state(const Ref_cpu &cpu) {
   RefCpuState state{};
   std::memcpy(state.gpr, cpu.state.gpr, sizeof(state.gpr));
@@ -40,9 +45,13 @@ RefCpuState export_state(const Ref_cpu &cpu) {
   return state;
 }
 
-void import_state(Ref_cpu &cpu, const RefCpuState &state) {
+void import_state(Ref_cpu &cpu, const RefCpuState &state,
+                  bool suppress_timer_interrupt) {
   std::memcpy(cpu.state.gpr, state.gpr, sizeof(cpu.state.gpr));
   std::memcpy(cpu.state.csr, state.csr, sizeof(cpu.state.csr));
+  if (suppress_timer_interrupt) {
+    suppress_timer_pending(cpu);
+  }
   cpu.state.pc = state.pc;
   cpu.state.store_addr = state.store_addr;
   cpu.state.store_data = state.store_data;
@@ -69,11 +78,28 @@ RefCpuContext *refcpu_init(uint32_t reset_pc, uint32_t ram_size_bytes) {
   ctx->cpu.init(reset_pc, kInitImage, ram_size_bytes);
   ctx->cpu.sim_end = false;
   ctx->cpu.device_effects_enable = false;
+  ctx->cpu.interrupt_delivery_enable = false;
+  ctx->cpu.ref_only = true;
+  ctx->cpu.uart_print = false;
   return ctx;
 }
 
 void refcpu_destroy(RefCpuContext *ctx) {
   delete ctx;
+}
+
+void refcpu_load_flash_image(RefCpuContext *ctx, const char *path) {
+  if (ctx == nullptr || path == nullptr || path[0] == '\0') {
+    return;
+  }
+  ctx->cpu.load_flash_image(path);
+}
+
+void refcpu_load_sdcard_image(RefCpuContext *ctx, const char *path) {
+  if (ctx == nullptr || path == nullptr || path[0] == '\0') {
+    return;
+  }
+  ctx->cpu.load_sdcard_image(path);
 }
 
 void refcpu_get_state(const RefCpuContext *ctx, RefCpuState *state) {
@@ -87,7 +113,7 @@ void refcpu_set_state(RefCpuContext *ctx, const RefCpuState *state) {
   if (ctx == nullptr || state == nullptr) {
     return;
   }
-  import_state(ctx->cpu, *state);
+  import_state(ctx->cpu, *state, !ctx->cpu.interrupt_delivery_enable);
 }
 
 void refcpu_get_step_info(const RefCpuContext *ctx, RefCpuStepInfo *info) {
@@ -118,25 +144,6 @@ void refcpu_step(RefCpuContext *ctx, uint64_t steps) {
   }
 }
 
-void refcpu_set_dut_expected_faults(RefCpuContext *ctx, bool inst, bool load,
-                                    bool store) {
-  if (ctx == nullptr) {
-    return;
-  }
-  ctx->cpu.dut_expect_pf_inst = inst;
-  ctx->cpu.dut_expect_pf_load = load;
-  ctx->cpu.dut_expect_pf_store = store;
-}
-
-void refcpu_sync_gprs_from_dut(RefCpuContext *ctx, const uint32_t *gpr,
-                               size_t count) {
-  if (ctx == nullptr || gpr == nullptr) {
-    return;
-  }
-  const size_t n = std::min(count, static_cast<size_t>(32));
-  std::memcpy(ctx->cpu.state.gpr, gpr, n * sizeof(uint32_t));
-}
-
 void refcpu_sync_ram_from_dut(RefCpuContext *ctx, const uint32_t *ram_src,
                               size_t size_bytes) {
   if (ctx == nullptr || ram_src == nullptr || ctx->cpu.memory == nullptr) {
@@ -145,24 +152,6 @@ void refcpu_sync_ram_from_dut(RefCpuContext *ctx, const uint32_t *ram_src,
   const size_t limit = static_cast<size_t>(ctx->cpu.ram_size);
   const size_t bytes = std::min(size_bytes, limit);
   std::memcpy(ctx->cpu.memory, ram_src, bytes);
-}
-
-void refcpu_sync_ram_range_from_dut(RefCpuContext *ctx, uint32_t ram_paddr,
-                                    const void *src, size_t size_bytes) {
-  if (ctx == nullptr || src == nullptr || ctx->cpu.memory == nullptr ||
-      size_bytes == 0) {
-    return;
-  }
-  if (ram_paddr < 0x80000000u) {
-    return;
-  }
-  const size_t off = static_cast<size_t>(ram_paddr - 0x80000000u);
-  const size_t limit = static_cast<size_t>(ctx->cpu.ram_size);
-  if (off >= limit) {
-    return;
-  }
-  const size_t bytes = std::min(size_bytes, limit - off);
-  std::memcpy(reinterpret_cast<uint8_t *>(ctx->cpu.memory) + off, src, bytes);
 }
 
 uint32_t *refcpu_get_ram_ptr(RefCpuContext *ctx) {
@@ -217,6 +206,16 @@ void refcpu_set_device_effects(RefCpuContext *ctx, bool enable) {
     return;
   }
   ctx->cpu.device_effects_enable = enable;
+}
+
+void refcpu_set_interrupt_delivery(RefCpuContext *ctx, bool enable) {
+  if (ctx == nullptr) {
+    return;
+  }
+  ctx->cpu.interrupt_delivery_enable = enable;
+  if (!enable) {
+    suppress_timer_pending(ctx->cpu);
+  }
 }
 
 void refcpu_set_sim_end(RefCpuContext *ctx, bool value) {

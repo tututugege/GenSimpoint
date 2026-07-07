@@ -1,10 +1,10 @@
 CXX = g++
-AR = gcc-ar
+AR = ar
 CXXSRC = $(wildcard *.cpp)
 LIBSRC = exec.cpp simpoint.cpp refcpu_api.cpp
 LIBHDR = $(wildcard include/*.h) $(wildcard include/api/*.h)
 CXXINCLUDE = -I./include -I./include/api -I./lib/include/
-CXXFLAGS = -O3 -march=native -funroll-loops -mtune=native -std=c++2a -flto
+CXXFLAGS = -O3 -march=native -funroll-loops -mtune=native -std=c++2a
 CXXFLAGS += -MMD -MP
 SPIKE ?= 0
 SOFTFLOAT_LIB ?= ./lib/softfloat/softfloat.a

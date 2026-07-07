@@ -56,8 +56,6 @@ enum enum_csr {
   csr_satp,
   csr_mhartid,
   csr_misa,
-  csr_time,
-  csr_timeh,
 };
 
 inline int cvt_number_to_csr(int csr_idx) {
@@ -125,12 +123,6 @@ inline int cvt_number_to_csr(int csr_idx) {
     break;
   case number_misa:
     ret = csr_misa;
-    break;
-  case number_time:
-    ret = csr_time;
-    break;
-  case number_timeh:
-    ret = csr_timeh;
     break;
   default:
     assert(0);

@@ -41,20 +41,16 @@ struct RefCpuStepInfo {
 RefCpuContext *refcpu_init(uint32_t reset_pc, uint32_t ram_size_bytes);
 void refcpu_destroy(RefCpuContext *ctx);
 
+void refcpu_load_flash_image(RefCpuContext *ctx, const char *path);
+void refcpu_load_sdcard_image(RefCpuContext *ctx, const char *path);
+
 void refcpu_get_state(const RefCpuContext *ctx, RefCpuState *state);
 void refcpu_set_state(RefCpuContext *ctx, const RefCpuState *state);
 void refcpu_get_step_info(const RefCpuContext *ctx, RefCpuStepInfo *info);
 
 void refcpu_step(RefCpuContext *ctx, uint64_t steps);
-void refcpu_set_dut_expected_faults(RefCpuContext *ctx, bool inst, bool load,
-                                    bool store);
-void refcpu_sync_gprs_from_dut(RefCpuContext *ctx, const uint32_t *gpr,
-                               size_t count);
-
 void refcpu_sync_ram_from_dut(RefCpuContext *ctx, const uint32_t *ram_src,
                               size_t size_bytes);
-void refcpu_sync_ram_range_from_dut(RefCpuContext *ctx, uint32_t ram_paddr,
-                                    const void *src, size_t size_bytes);
 uint32_t *refcpu_get_ram_ptr(RefCpuContext *ctx);
 uint32_t refcpu_load_word(const RefCpuContext *ctx, uint32_t addr);
 void refcpu_store_word(RefCpuContext *ctx, uint32_t addr, uint32_t data);
@@ -66,6 +62,7 @@ uint32_t refcpu_get_io_word(const RefCpuContext *ctx, uint32_t addr);
 void refcpu_set_uart_print(RefCpuContext *ctx, bool enable);
 void refcpu_set_ref_only(RefCpuContext *ctx, bool enable);
 void refcpu_set_device_effects(RefCpuContext *ctx, bool enable);
+void refcpu_set_interrupt_delivery(RefCpuContext *ctx, bool enable);
 void refcpu_set_sim_end(RefCpuContext *ctx, bool value);
 void refcpu_set_sim_time(RefCpuContext *ctx, uint64_t sim_time);
 

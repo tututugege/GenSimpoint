@@ -138,7 +138,10 @@ enum class SimMode {
 struct SimConfig {
   SimMode mode = SimMode::NORMAL;
   std::string image_file;
+  std::string flash_image_file;
+  std::string sdcard_image_file;
   uint32_t ram_size = PHYSICAL_MEMORY_LENGTH;
+  uint32_t reset_pc = 0;
   bool difftest = false;
 
   // Mode: GEN_BBV
@@ -202,12 +205,28 @@ public:
   bool uart_print = false;
   bool ref_only = false;
   bool device_effects_enable = true;
-  bool dut_pf_check_enable = true;
-  bool dut_expect_pf_inst = false;
-  bool dut_expect_pf_load = false;
-  bool dut_expect_pf_store = false;
+  bool interrupt_delivery_enable = true;
+  std::vector<uint8_t> flash_image;
+  std::vector<uint8_t> sdcard_image;
+  std::unordered_map<uint32_t, uint32_t> ocsdc_regs;
+  bool ocsdc_data_pending = false;
+  uint32_t xps_intc_isr = 0;
+  uint32_t xps_intc_ier = 0;
+  uint32_t xps_intc_mer = 0;
 
   void init(uint32_t reset_pc, const char *image, uint32_t size);
+  void load_flash_image(const std::string &path);
+  void load_sdcard_image(const std::string &path);
+  void ocsdc_reset();
+  void ocsdc_write_reg(uint32_t word_addr, uint32_t data);
+  uint32_t ocsdc_read_reg(uint32_t word_addr) const;
+  void ocsdc_execute_command(uint32_t command, uint32_t argument);
+  void xps_intc_reset();
+  uint32_t xps_intc_read_reg(uint32_t word_addr) const;
+  void xps_intc_write_reg(uint32_t word_addr, uint32_t data);
+  void xps_intc_set_irq_level(uint32_t irq_id, bool asserted);
+  void refresh_external_interrupt();
+  void uart_refresh_interrupt();
   void exec(const SimConfig &config);
   bool va2pa(uint32_t &p_addr, uint32_t v_addr, uint32_t type);
   void RISCV();

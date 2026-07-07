@@ -29,8 +29,9 @@ std::vector<CkptIoRange> expected_io_layout() {
   return {
       {BOOT_IO_BASE, BOOT_IO_SIZE},
       {UART_BASE, UART_MMIO_SIZE},
-      {PLIC_BASE, PLIC_MMIO_SIZE},
+      {XPS_INTC_BASE, XPS_INTC_MMIO_SIZE},
       {TIMER_BASE, TIMER_MMIO_SIZE},
+      {OCSDC_BASE, OCSDC_MMIO_SIZE},
   };
 }
 

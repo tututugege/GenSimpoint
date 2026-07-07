@@ -4,6 +4,7 @@
 #include "CSR.h"
 #include "RISCV.h"
 #include "ref.h"
+#include <cstdio>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
@@ -18,18 +19,242 @@ extern "C" {
 
 namespace {
 constexpr uint32_t kRamBase = 0x80000000u;
-constexpr uint32_t kRamUpperBound = 0xC0000000u;
+constexpr uint64_t kRamUpperBound = 0x100000000ull;
 constexpr uint32_t kRamSizeBytes = kRamUpperBound - kRamBase;
 constexpr uint32_t kBootIoBase = 0x00000000u;
-constexpr uint32_t kBootIoSize = 0x00002000u;
+constexpr uint32_t kBootIoSize = 0x00100000u;
+constexpr uint32_t kSdSectorSize = 512u;
+constexpr bool kLogVerboseTimer = false;
+constexpr bool kLogVerboseReturns = false;
+constexpr bool kLogVerboseCsrMip = false;
+constexpr bool kLogVerboseWfi = false;
+constexpr bool kLogVerboseXpsIntc = false;
+constexpr bool kLogVerboseOcsdcIrqEnable = false;
+constexpr bool kLogVerboseOcsdcData = false;
+constexpr bool kLogProgressSimTime = false;
+constexpr bool kLogUserTrapSummary = false;
+constexpr bool kLogUserEntrySummary = false;
+constexpr bool kLogUserSyscallSummary = false;
+constexpr bool kMirrorUserWriteSyscalls = true;
 static uint64_t g_ref_timer_offset = 0;
-static uint64_t g_ref_timer_cmp = 0;
+static uint64_t g_ref_timer_cmp = ~0ull;
+static bool g_disable_uart_console_output = false;
+
+constexpr uint32_t kUartIrqId = 2u;
+constexpr uint32_t kOcsdcCmdIrqId = 3u;
+constexpr uint32_t kOcsdcDatIrqId = 4u;
+
+constexpr uint32_t kUartRegRxTxDll = 0x0u;
+constexpr uint32_t kUartRegIerDlm = 0x1u;
+constexpr uint32_t kUartRegIirFcr = 0x2u;
+constexpr uint32_t kUartRegLcr = 0x3u;
+constexpr uint32_t kUartRegMcr = 0x4u;
+constexpr uint32_t kUartRegLsr = 0x5u;
+constexpr uint32_t kUartRegMsr = 0x6u;
+constexpr uint32_t kUartRegScr = 0x7u;
+
+constexpr uint8_t kUartLcrDlab = 0x80u;
+constexpr uint8_t kUartLsrThre = 0x20u;
+constexpr uint8_t kUartLsrTemt = 0x40u;
+constexpr uint8_t kUartMsrCts = 0x10u;
+constexpr uint8_t kUartMsrDsr = 0x20u;
+constexpr uint8_t kUartMsrDcd = 0x80u;
+constexpr uint8_t kUartIerThri = 0x02u;
+constexpr uint8_t kUartIirNoInt = 0x01u;
+constexpr uint8_t kUartIirThre = 0x02u;
+constexpr uint8_t kUartIirFifoEnabled = 0xc0u;
+
+bool ref_uart_trace_enabled() {
+  static const bool enabled = [] {
+    const char *env = std::getenv("REF_UART_TRACE");
+    return env != nullptr && env[0] != '\0' && env[0] != '0';
+  }();
+  return enabled;
+}
+
+bool ref_ocsdc_probe_trace_enabled() {
+  static const bool enabled = [] {
+    const char *env = std::getenv("REF_OCSDC_PROBE_TRACE");
+    return env != nullptr && env[0] != '\0' && env[0] != '0';
+  }();
+  return enabled;
+}
+
+bool ref_stop_at_shell_enabled() {
+  static const bool enabled = [] {
+    const char *env = std::getenv("REF_STOP_AT_SHELL");
+    return env != nullptr && env[0] != '\0' && env[0] != '0';
+  }();
+  return enabled;
+}
+
+bool ref_init_print_trace_enabled() {
+  static const bool enabled = [] {
+    const char *env = std::getenv("REF_INIT_PRINT_TRACE");
+    return env != nullptr && env[0] != '\0' && env[0] != '0';
+  }();
+  return enabled;
+}
+
+bool observe_uart_console_byte(uint64_t time, char ch) {
+  static char window[4] = {};
+  static bool init_banner_seen = false;
+  static unsigned init_banner_pos = 0;
+  static uint64_t init_banner_start_time = 0;
+  constexpr char kInitBannerPrefix[] = "_     ___ _   _";
+
+  if (ref_init_print_trace_enabled() && !init_banner_seen) {
+    if (ch == kInitBannerPrefix[init_banner_pos]) {
+      if (init_banner_pos == 0) {
+        init_banner_start_time = time;
+      }
+      ++init_banner_pos;
+      if (init_banner_pos == sizeof(kInitBannerPrefix) - 1) {
+        init_banner_seen = true;
+        std::cerr << "\n[RefCPU][INIT_PRINT_BEGIN] sim_time="
+                  << init_banner_start_time
+                  << " confirm_time=" << time << std::endl;
+      }
+    } else {
+      init_banner_pos = (ch == kInitBannerPrefix[0]) ? 1u : 0u;
+      if (init_banner_pos == 1u) {
+        init_banner_start_time = time;
+      }
+    }
+  }
+
+  window[0] = window[1];
+  window[1] = window[2];
+  window[2] = window[3];
+  window[3] = ch;
+  if (!ref_stop_at_shell_enabled()) {
+    return false;
+  }
+  if (window[0] == '/' && window[1] == ' ' && window[2] == '#' &&
+      window[3] == ' ') {
+    std::cerr << "\n[RefCPU][SHELL] sim_time=" << time << std::endl;
+    return true;
+  }
+  return false;
+}
+
+const char *uart_reg_name(uint32_t reg) {
+  switch (reg) {
+  case kUartRegRxTxDll:
+    return "RBR/THR/DLL";
+  case kUartRegIerDlm:
+    return "IER/DLM";
+  case kUartRegIirFcr:
+    return "IIR/FCR";
+  case kUartRegLcr:
+    return "LCR";
+  case kUartRegMcr:
+    return "MCR";
+  case kUartRegLsr:
+    return "LSR";
+  case kUartRegMsr:
+    return "MSR";
+  case kUartRegScr:
+    return "SCR";
+  default:
+    return "UART";
+  }
+}
+
+void trace_uart_load(uint64_t time, uint32_t pc, uint32_t paddr, uint8_t func3,
+                     uint32_t raw_word, uint32_t result) {
+  if (!ref_uart_trace_enabled()) {
+    return;
+  }
+  const uint32_t reg = paddr - UART_BASE;
+  std::fprintf(stderr,
+               "[REF][UART][LOAD] t=%llu pc=0x%08x addr=0x%08x reg=0x%02x(%s) "
+               "func3=0x%x raw_word=0x%08x result=0x%08x\n",
+               static_cast<unsigned long long>(time), pc, paddr, reg,
+               uart_reg_name(reg), static_cast<unsigned>(func3), raw_word,
+               result);
+}
+
+void trace_uart_store_effect(uint64_t time, uint32_t pc, uint32_t paddr,
+                             uint8_t strb, uint32_t data, uint32_t before0,
+                             uint32_t after0, uint32_t after4) {
+  if (!ref_uart_trace_enabled()) {
+    return;
+  }
+  const uint32_t reg = paddr - UART_BASE;
+  std::fprintf(stderr,
+               "[REF][UART][STORE] t=%llu pc=0x%08x addr=0x%08x reg=0x%02x(%s) "
+               "strb=0x%x data=0x%08x word0:0x%08x->0x%08x word4=0x%08x\n",
+               static_cast<unsigned long long>(time), pc, paddr, reg,
+               uart_reg_name(reg), static_cast<unsigned>(strb), data, before0,
+               after0, after4);
+}
+
+struct SdCardId {
+  uint32_t ocr;
+  uint32_t cid[4];
+  uint32_t csd[4];
+};
+
+SdCardId make_sdcard_id(size_t image_size) {
+  SdCardId id = {};
+  constexpr uint32_t kSdCmdClass =
+      (1u << 2) |  // CCC_BLOCK_READ
+      (1u << 4) |  // CCC_BLOCK_WRITE
+      (1u << 5) |  // CCC_ERASE
+      (1u << 6) |  // CCC_WRITE_PROT
+      (1u << 8) |  // CCC_APP_SPEC
+      (1u << 10);  // CCC_SWITCH
+  id.ocr = 0xc0ff8000u; // power up complete + SDHC/SDXC + 2.7V-3.6V
+  id.cid[0] = 0x03534453u;
+  id.cid[1] = 0x30303030u;
+  id.cid[2] = 0x12345678u;
+  id.cid[3] = 0x01020304u;
+
+  const uint64_t units = (static_cast<uint64_t>(image_size) + 524287u) / 524288u;
+  const uint32_t csize = units == 0 ? 0u : static_cast<uint32_t>(units - 1u);
+
+  id.csd[0] = 0x400e0032u;
+  id.csd[1] = kSdCmdClass << 20;
+  id.csd[1] |= 9u << 16; // READ_BL_LEN = 512 bytes
+  id.csd[1] |= (csize >> 16) & 0x3fu;
+  id.csd[2] = (csize & 0xffffu) << 16;
+  id.csd[3] = 0u;
+  return id;
+}
 
 [[noreturn]] void mem_oob_fatal(const char *op, uint32_t addr, uint32_t size) {
   std::cerr << "[RefCPU] illegal " << op << " at paddr=0x" << std::hex << addr
             << " size=0x" << size << " (not in RAM or implemented MMIO)"
             << std::dec << std::endl;
   std::exit(1);
+}
+
+std::vector<uint8_t> load_binary_file(const std::string &path,
+                                      const char *kind) {
+  std::ifstream file(path, std::ios::binary);
+  if (!file.is_open()) {
+    std::cerr << "[RefCPU] Failed to open " << kind << ": " << path
+              << std::endl;
+    std::exit(1);
+  }
+
+  file.seekg(0, std::ios::end);
+  const std::streamsize sz = file.tellg();
+  file.seekg(0, std::ios::beg);
+  if (sz < 0) {
+    std::cerr << "[RefCPU] Failed to stat " << kind << ": " << path
+              << std::endl;
+    std::exit(1);
+  }
+
+  std::vector<uint8_t> data(static_cast<size_t>(sz));
+  if (sz > 0 && !file.read(reinterpret_cast<char *>(data.data()), sz)) {
+    std::cerr << "[RefCPU] Failed to read " << kind << ": " << path
+              << std::endl;
+    std::exit(1);
+  }
+  return data;
 }
 
 inline bool is_ram_range(uint32_t addr, uint32_t size) {
@@ -56,10 +281,9 @@ inline bool is_mmio_range(uint32_t addr, uint32_t size) {
 
   return in_range(kBootIoBase, kBootIoSize) ||
          in_range(UART_BASE, UART_MMIO_SIZE) ||
-         in_range(PLIC_BASE, PLIC_MMIO_SIZE) ||
          in_range(XPS_INTC_BASE, XPS_INTC_MMIO_SIZE) ||
          in_range(TIMER_BASE, TIMER_MMIO_SIZE) ||
-         in_range(DMA_BASE, DMA_MMIO_SIZE);
+         in_range(OCSDC_BASE, OCSDC_MMIO_SIZE);
 }
 
 inline bool is_legal_phys_range(uint32_t addr, uint32_t size) {
@@ -83,19 +307,19 @@ static inline float32_t to_f32(uint32_t v) {
 }
 
 static inline uint32_t ref_effective_mip(uint32_t mip_reg, uint32_t now,
-                                         bool device_effects_enable) {
-  if (device_effects_enable &&
+                                         bool synthesize_timer_interrupt) {
+  if (synthesize_timer_interrupt &&
       (static_cast<uint64_t>(now) + g_ref_timer_offset) >= g_ref_timer_cmp) {
     return mip_reg | MIP_MTIP;
   }
-  return mip_reg & ~MIP_MTIP;
+  return mip_reg;
 }
 
 static inline void sync_timer_csrs(CPU_state &state, uint32_t now,
-                                   bool device_effects_enable) {
-  state.csr[csr_mip] =
-      ref_effective_mip(state.csr[csr_mip], now, device_effects_enable);
-  state.csr[csr_sip] = state.csr[csr_mip] & 0x00000333u;
+                                   bool synthesize_timer_interrupt) {
+  state.csr[csr_sip] =
+      ref_effective_mip(state.csr[csr_mip], now, synthesize_timer_interrupt) &
+      0x00000333u;
 }
 
 static inline uint64_t ref_timer_now(uint32_t now) {
@@ -201,7 +425,7 @@ static inline uint32_t f32_classify_riscv(float32_t f) {
 
 uint32_t Ref_cpu::visible_mip() const {
   return ref_effective_mip(state.csr[csr_mip], static_cast<uint32_t>(sim_time),
-                           device_effects_enable);
+                           device_effects_enable && interrupt_delivery_enable);
 }
 
 uint32_t Ref_cpu::visible_sip() const {
@@ -219,7 +443,7 @@ Ref_cpu::~Ref_cpu() {
 void Ref_cpu::init(uint32_t reset_pc, const char *image, uint32_t size) {
   state.pc = reset_pc;
   g_ref_timer_offset = 0;
-  g_ref_timer_cmp = 0;
+  g_ref_timer_cmp = ~0ull;
   ram_size = size;
   if (ram_size != kRamSizeBytes) {
     std::cerr << "[RefCPU] Unsupported RAM size: 0x" << std::hex << ram_size
@@ -235,40 +459,51 @@ void Ref_cpu::init(uint32_t reset_pc, const char *image, uint32_t size) {
     exit(1);
   }
   io_words.clear();
+  io_words[UART_BASE + 0x00] =
+      static_cast<uint32_t>(kUartIirNoInt | kUartIirFifoEnabled) << 16;
+  io_words[UART_BASE + 0x04] =
+      0x00000003u |
+      (static_cast<uint32_t>(kUartLsrThre | kUartLsrTemt) << 8) |
+      (static_cast<uint32_t>(kUartMsrCts | kUartMsrDsr | kUartMsrDcd) << 16);
+  ocsdc_regs.clear();
+  ocsdc_data_pending = false;
 
-  std::ifstream inst_data(image, std::ios::in | std::ios::binary);
-  if (!inst_data.is_open()) {
-    std::cerr << "Error: Image " << (image ? image : "NULL")
-              << " does not exist" << std::endl;
-    exit(1);
-  }
+  if (image != nullptr) {
+    std::ifstream inst_data(image, std::ios::in | std::ios::binary);
+    if (!inst_data.is_open()) {
+      std::cerr << "Error: Image " << image << " does not exist" << std::endl;
+      exit(1);
+    }
 
-  inst_data.seekg(0, std::ios::end);
-  std::streamsize img_size = inst_data.tellg();
-  inst_data.seekg(0, std::ios::beg);
+    inst_data.seekg(0, std::ios::end);
+    std::streamsize img_size = inst_data.tellg();
+    inst_data.seekg(0, std::ios::beg);
 
-  if (img_size < 0 || static_cast<uint64_t>(img_size) > kRamSizeBytes) {
-    std::cerr << "[RefCPU] Image too large for 1GB RAM window: " << img_size
+    if (img_size < 0 || static_cast<uint64_t>(img_size) > kRamSizeBytes) {
+      std::cerr << "[RefCPU] Image too large for 1GB RAM window: " << img_size
+                << " bytes" << std::endl;
+      exit(1);
+    }
+    const uint32_t img_bytes = static_cast<uint32_t>(img_size);
+    check_mem_range_or_log("image load", kRamBase, img_bytes);
+
+    std::cout << "[RefCPU] Loading image at 0x80000000, size: " << img_size
               << " bytes" << std::endl;
-    exit(1);
-  }
-  const uint32_t img_bytes = static_cast<uint32_t>(img_size);
-  check_mem_range_or_log("image load", kRamBase, img_bytes);
+    if (!inst_data.read(reinterpret_cast<char *>(memory), img_bytes)) {
+      std::cerr << "读取文件失败！" << std::endl;
+      exit(1);
+    }
 
-  std::cout << "[RefCPU] Loading image at 0x80000000, size: " << img_size
-            << " bytes" << std::endl;
-  if (!inst_data.read(reinterpret_cast<char *>(memory), img_bytes)) {
-    std::cerr << "读取文件失败！" << std::endl;
-    exit(1);
+    inst_data.close();
   }
 
   store_word(0x10000004, 0x00006000); // 和进入 OpenSBI 相关
-  store_word(0x0, 0xf1402573);
-  store_word(0x4, 0x83e005b7);
-  store_word(0x8, 0x800002b7);
-  store_word(0xc, 0x00028067);
-
-  inst_data.close();
+  if (image != nullptr) {
+    store_word(0x0, 0xf1402573);
+    store_word(0x4, 0x83e005b7);
+    store_word(0x8, 0x800002b7);
+    store_word(0xc, 0x00028067);
+  }
 
   for (int i = 0; i < 32; i++) {
     state.gpr[i] = 0;
@@ -289,21 +524,469 @@ void Ref_cpu::init(uint32_t reset_pc, const char *image, uint32_t size) {
   fcsr_fflags = 0;
   fcsr_frm = 0;
   sim_time = 0;
+  g_disable_uart_console_output = false;
   difftest_started = false;
   sim_end = false;
   uart_print = false;
   ref_only = false;
-  dut_pf_check_enable = true;
-  dut_expect_pf_inst = false;
-  dut_expect_pf_load = false;
-  dut_expect_pf_store = false;
+  ocsdc_reset();
+  xps_intc_reset();
+}
+
+void Ref_cpu::load_flash_image(const std::string &path) {
+  flash_image = load_binary_file(path, "flash image");
+  if (flash_image.size() > kBootIoSize) {
+    std::cerr << "[RefCPU] Flash image too large for boot window: "
+              << flash_image.size() << " > " << kBootIoSize << std::endl;
+    std::exit(1);
+  }
+
+  std::cout << "[RefCPU] Loading flash image at 0x0, size: "
+            << flash_image.size() << " bytes" << std::endl;
+  for (size_t i = 0; i < flash_image.size(); ++i) {
+    const uint32_t addr = static_cast<uint32_t>(i);
+    const uint32_t word_addr = addr & ~0x3u;
+    const uint32_t shift = (addr & 0x3u) * 8;
+    uint32_t old_word = load_word(word_addr);
+    old_word &= ~(0xffu << shift);
+    old_word |= static_cast<uint32_t>(flash_image[i]) << shift;
+    store_word(word_addr, old_word);
+  }
+}
+
+void Ref_cpu::load_sdcard_image(const std::string &path) {
+  sdcard_image = load_binary_file(path, "sdcard image");
+  const uint64_t rounded_capacity =
+      ((static_cast<uint64_t>(sdcard_image.size()) + 524287u) / 524288u) *
+      524288u;
+  if (rounded_capacity > sdcard_image.size()) {
+    sdcard_image.resize(static_cast<size_t>(rounded_capacity), 0);
+  }
+  std::cout << "[RefCPU] Loaded sdcard backend, size: " << sdcard_image.size()
+            << " bytes" << std::endl;
+}
+
+void Ref_cpu::ocsdc_reset() {
+  ocsdc_regs.clear();
+  ocsdc_regs[OCSDC_BASE + 0x00] = 0;
+  ocsdc_regs[OCSDC_BASE + 0x04] = 0;
+  ocsdc_regs[OCSDC_BASE + 0x2c] = 3300; // POWER_CONTROL
+  ocsdc_regs[OCSDC_BASE + 0x30] = 0;
+  ocsdc_regs[OCSDC_BASE + 0x34] = 0;
+  ocsdc_regs[OCSDC_BASE + 0x38] = 0;
+  ocsdc_regs[OCSDC_BASE + 0x3c] = 0;
+  ocsdc_regs[OCSDC_BASE + 0x40] = 0;
+  ocsdc_data_pending = false;
+}
+
+void Ref_cpu::xps_intc_reset() {
+  xps_intc_isr = 0;
+  xps_intc_ier = 0;
+  xps_intc_mer = 0;
+  io_words[XPS_INTC_BASE + 0x00] = 0; // ISR
+  io_words[XPS_INTC_BASE + 0x04] = 0; // IPR
+  io_words[XPS_INTC_BASE + 0x08] = 0; // IER
+  io_words[XPS_INTC_BASE + 0x18] = 0xffffffffu; // IVR
+  io_words[XPS_INTC_BASE + 0x1c] = 0; // MER
+  refresh_external_interrupt();
+}
+
+static uint32_t uart_reg_word_addr(uint32_t addr) {
+  return UART_BASE + ((addr - UART_BASE) & ~0x3u);
+}
+
+static uint8_t uart_extract_byte(uint32_t word, uint32_t byte_index) {
+  return static_cast<uint8_t>((word >> (byte_index * 8)) & 0xffu);
+}
+
+static uint32_t uart_update_byte(uint32_t word, uint32_t byte_index,
+                                 uint8_t value) {
+  const uint32_t shift = byte_index * 8;
+  word &= ~(0xffu << shift);
+  word |= static_cast<uint32_t>(value) << shift;
+  return word;
+}
+
+static uint8_t uart_read_reg8(
+    const std::unordered_map<uint32_t, uint32_t> &io_words, uint32_t addr) {
+  const uint32_t word_addr = uart_reg_word_addr(addr);
+  const uint32_t byte_index = addr & 0x3u;
+  auto it = io_words.find(word_addr);
+  const uint32_t word = (it == io_words.end()) ? 0u : it->second;
+  return uart_extract_byte(word, byte_index);
+}
+
+static void uart_write_reg8(std::unordered_map<uint32_t, uint32_t> &io_words,
+                            uint32_t addr, uint8_t value) {
+  const uint32_t word_addr = uart_reg_word_addr(addr);
+  const uint32_t byte_index = addr & 0x3u;
+  auto it = io_words.find(word_addr);
+  const uint32_t old_word = (it == io_words.end()) ? 0u : it->second;
+  io_words[word_addr] = uart_update_byte(old_word, byte_index, value);
+}
+
+void Ref_cpu::uart_refresh_interrupt() {
+  const uint8_t ier = uart_read_reg8(io_words, UART_BASE + kUartRegIerDlm);
+  const uint8_t lsr = uart_read_reg8(io_words, UART_BASE + kUartRegLsr);
+  const bool thre_pending = ((ier & kUartIerThri) != 0) &&
+                            ((lsr & kUartLsrThre) != 0);
+  uart_write_reg8(io_words, UART_BASE + kUartRegIirFcr,
+                  static_cast<uint8_t>(kUartIirFifoEnabled |
+                                       (thre_pending ? kUartIirThre
+                                                     : kUartIirNoInt)));
+  xps_intc_set_irq_level(kUartIrqId, thre_pending);
+}
+
+uint32_t Ref_cpu::xps_intc_read_reg(uint32_t word_addr) const {
+  switch (word_addr - XPS_INTC_BASE) {
+  case 0x00:
+    return xps_intc_isr;
+  case 0x04:
+    return xps_intc_isr & xps_intc_ier;
+  case 0x08:
+    return xps_intc_ier;
+  case 0x18: {
+    const uint32_t pending = xps_intc_isr & xps_intc_ier;
+    if (pending == 0) {
+      return 0xffffffffu;
+    }
+    for (uint32_t i = 0; i < 32; ++i) {
+      if (pending & (1u << i)) {
+        return i;
+      }
+    }
+    return 0xffffffffu;
+  }
+  case 0x1c:
+    return xps_intc_mer;
+  default: {
+    auto it = io_words.find(word_addr);
+    return it == io_words.end() ? 0u : it->second;
+  }
+  }
+}
+
+void Ref_cpu::refresh_external_interrupt() {
+  const bool global_enable = (xps_intc_mer & 0x3u) == 0x3u;
+  const bool pending = global_enable && ((xps_intc_isr & xps_intc_ier) != 0);
+  if (pending) {
+    state.csr[csr_mip] |= MIP_SEIP;
+  } else {
+    state.csr[csr_mip] &= ~MIP_SEIP;
+  }
+  state.csr[csr_sip] = visible_sip();
+  if (kLogVerboseXpsIntc && (xps_intc_isr != 0 || xps_intc_ier != 0 ||
+                             xps_intc_mer != 0 || pending)) {
+    std::cerr << "[RefCPU][XPS_INTC] refresh"
+              << " isr=0x" << std::hex << xps_intc_isr
+              << " ier=0x" << xps_intc_ier
+              << " mer=0x" << xps_intc_mer
+              << " pending=" << std::dec << pending
+              << " mip=0x" << std::hex << state.csr[csr_mip]
+              << " sip=0x" << state.csr[csr_sip] << std::dec << std::endl;
+  }
+}
+
+void Ref_cpu::xps_intc_set_irq_level(uint32_t irq_id, bool asserted) {
+  if (irq_id >= 32) {
+    return;
+  }
+  const uint32_t mask = 1u << irq_id;
+  if (asserted) {
+    xps_intc_isr |= mask;
+  } else {
+    xps_intc_isr &= ~mask;
+  }
+  io_words[XPS_INTC_BASE + 0x00] = xps_intc_isr;
+  io_words[XPS_INTC_BASE + 0x04] = xps_intc_isr & xps_intc_ier;
+  if (kLogVerboseXpsIntc &&
+      (irq_id == kUartIrqId || irq_id == kOcsdcCmdIrqId ||
+       irq_id == kOcsdcDatIrqId)) {
+    std::cerr << "[RefCPU][XPS_INTC] irq" << irq_id
+              << (asserted ? " assert" : " clear") << " isr=0x" << std::hex
+              << xps_intc_isr << " ier=0x" << xps_intc_ier
+              << " mer=0x" << xps_intc_mer
+              << " ipr=0x" << (xps_intc_isr & xps_intc_ier) << std::dec
+              << std::endl;
+  }
+  refresh_external_interrupt();
+}
+
+void Ref_cpu::xps_intc_write_reg(uint32_t word_addr, uint32_t data) {
+  const uint32_t offset = word_addr - XPS_INTC_BASE;
+  if (kLogVerboseXpsIntc &&
+      (offset == 0x08 || offset == 0x10 || offset == 0x14 ||
+       offset == 0x18 || offset == 0x1c)) {
+    std::cerr << "[RefCPU][XPS_INTC] write off=0x" << std::hex << offset
+              << " data=0x" << data << std::dec << std::endl;
+  }
+  switch (word_addr - XPS_INTC_BASE) {
+  case 0x00: // ISR clear-on-write
+    xps_intc_isr &= ~data;
+    break;
+  case 0x08: // IER
+    xps_intc_ier = data;
+    break;
+  case 0x0c: // IAR
+    xps_intc_isr &= ~data;
+    break;
+  case 0x10: // SIE
+    xps_intc_ier |= data;
+    break;
+  case 0x14: // CIE
+    xps_intc_ier &= ~data;
+    break;
+  case 0x1c: // MER
+    xps_intc_mer = data;
+    break;
+  default:
+    io_words[word_addr] = data;
+    break;
+  }
+  io_words[XPS_INTC_BASE + 0x00] = xps_intc_isr;
+  io_words[XPS_INTC_BASE + 0x04] = xps_intc_isr & xps_intc_ier;
+  io_words[XPS_INTC_BASE + 0x08] = xps_intc_ier;
+  io_words[XPS_INTC_BASE + 0x18] = xps_intc_read_reg(XPS_INTC_BASE + 0x18);
+  io_words[XPS_INTC_BASE + 0x1c] = xps_intc_mer;
+  refresh_external_interrupt();
+}
+
+uint32_t Ref_cpu::ocsdc_read_reg(uint32_t word_addr) const {
+  auto it = ocsdc_regs.find(word_addr);
+  return it == ocsdc_regs.end() ? 0u : it->second;
+}
+
+void Ref_cpu::ocsdc_execute_command(uint32_t command, uint32_t argument) {
+  constexpr uint32_t kCmdResp48 = 0x1;
+  constexpr uint32_t kCmdResp136 = 0x2;
+  constexpr uint32_t kCmdDataRead = 0x20;
+  constexpr uint32_t kCmdDataWrite = 0x40;
+  constexpr uint32_t kCmdIdxShift = 8;
+  constexpr uint32_t kCmdIntCc = 0x0001;
+  constexpr uint32_t kDatIntCc = 0x01;
+  constexpr uint32_t kDatIntTrs = 0x01;
+
+  const uint32_t opcode = command >> kCmdIdxShift;
+  const bool wants_resp = command & (kCmdResp48 | kCmdResp136);
+  const bool data_read = command & kCmdDataRead;
+  const bool data_write = command & kCmdDataWrite;
+  const SdCardId card_id = make_sdcard_id(sdcard_image.size());
+
+  ocsdc_regs[OCSDC_BASE + 0x34] = 0;
+  ocsdc_regs[OCSDC_BASE + 0x3c] = 0;
+  ocsdc_data_pending = false;
+
+  auto set_r1 = [&](uint32_t resp) {
+    ocsdc_regs[OCSDC_BASE + 0x08] = resp;
+    ocsdc_regs[OCSDC_BASE + 0x0c] = 0;
+    ocsdc_regs[OCSDC_BASE + 0x10] = 0;
+    ocsdc_regs[OCSDC_BASE + 0x14] = 0;
+  };
+
+  auto write_data_buffer = [&](const uint8_t *src, uint32_t len) {
+    const uint32_t dst = ocsdc_read_reg(OCSDC_BASE + 0x60);
+    check_mem_range_or_log("ocsdc dma read", dst, len);
+    for (uint32_t i = 0; i < len; ++i) {
+      const uint32_t addr = dst + i;
+      const uint32_t word_addr = addr & ~0x3u;
+      const uint32_t shift = (addr & 0x3u) * 8;
+      uint32_t old_word = load_word(word_addr);
+      old_word &= ~(0xffu << shift);
+      old_word |= static_cast<uint32_t>(src[i]) << shift;
+      store_word(word_addr, old_word);
+    }
+  };
+
+  switch (opcode) {
+  case 0:
+    set_r1(0);
+    break;
+  case 8:
+    set_r1(argument);
+    break;
+  case 55:
+    set_r1(0x20);
+    break;
+  case 41:
+    set_r1(card_id.ocr);
+    break;
+  case 2:
+    ocsdc_regs[OCSDC_BASE + 0x08] = card_id.cid[0];
+    ocsdc_regs[OCSDC_BASE + 0x0c] = card_id.cid[1];
+    ocsdc_regs[OCSDC_BASE + 0x10] = card_id.cid[2];
+    ocsdc_regs[OCSDC_BASE + 0x14] = card_id.cid[3];
+    break;
+  case 3:
+    set_r1(1u << 16);
+    break;
+  case 7:
+    set_r1(0x00000900u);
+    break;
+  case 9:
+    ocsdc_regs[OCSDC_BASE + 0x08] = card_id.csd[0];
+    ocsdc_regs[OCSDC_BASE + 0x0c] = card_id.csd[1];
+    ocsdc_regs[OCSDC_BASE + 0x10] = card_id.csd[2];
+    ocsdc_regs[OCSDC_BASE + 0x14] = card_id.csd[3];
+    break;
+  case 13:
+    set_r1(0x00000900u | (4u << 9) | (1u << 8));
+    break;
+  case 16:
+    set_r1(0);
+    break;
+  case 17:
+    set_r1(0);
+    break;
+  case 18:
+    set_r1(0x00000900u);
+    break;
+  case 6:
+    set_r1(0);
+    break;
+  default:
+    set_r1(0);
+    break;
+  }
+
+  if (kLogVerboseOcsdcData &&
+      (opcode == 41 || opcode == 9 || opcode == 17 || opcode == 18)) {
+    std::cerr << "[RefCPU][OCSDC] opcode=" << opcode << " arg=0x" << std::hex
+              << argument << " resp0=0x" << ocsdc_regs[OCSDC_BASE + 0x08]
+              << " resp1=0x" << ocsdc_regs[OCSDC_BASE + 0x0c]
+              << " resp2=0x" << ocsdc_regs[OCSDC_BASE + 0x10]
+              << " resp3=0x" << ocsdc_regs[OCSDC_BASE + 0x14] << std::dec
+              << std::endl;
+  }
+
+  if (data_read || data_write) {
+    const uint32_t dst = ocsdc_read_reg(OCSDC_BASE + 0x60);
+    const uint32_t blk_size = (ocsdc_read_reg(OCSDC_BASE + 0x44) & 0xffffu) + 1u;
+    const uint32_t blk_count = (ocsdc_read_reg(OCSDC_BASE + 0x48) & 0xffffu) + 1u;
+    const uint64_t total_bytes =
+        static_cast<uint64_t>(blk_size) * static_cast<uint64_t>(blk_count);
+    const uint64_t card_offset =
+        static_cast<uint64_t>(argument) * static_cast<uint64_t>(kSdSectorSize);
+
+    if (kLogVerboseOcsdcData &&
+        (opcode == 17 || opcode == 18 || opcode == 41 || opcode == 9)) {
+      std::cerr << "[RefCPU][OCSDC] cmd=" << opcode << " arg=0x" << std::hex
+                << argument << " blk_size=0x" << blk_size
+                << " blk_count=0x" << blk_count << " card_offset=0x"
+                << card_offset << std::dec << std::endl;
+    }
+
+    if (data_read) {
+      if (opcode == 51 && blk_size == 8 && blk_count == 1) {
+        // Linux mmc_app_send_scr() DMA-loads 8 raw bytes, then converts each
+        // 32-bit lane with be32_to_cpu(). Encode SCR as:
+        //   raw_scr[0] = 0x02050000 -> spec v2, 1-bit + 4-bit support
+        //   raw_scr[1] = 0x00000000
+        uint8_t scr[8] = {0x02, 0x05, 0x00, 0x00,
+                          0x00, 0x00, 0x00, 0x00};
+        write_data_buffer(scr, sizeof(scr));
+      } else if (opcode == 6 && blk_size == 64 && blk_count == 1) {
+        uint32_t switch_status[16] = {};
+        const bool do_switch = (argument >> 31) & 1u;
+        switch_status[3] = 0x00020000u;
+        switch_status[4] = do_switch ? 0x01000000u : 0x00000000u;
+        switch_status[7] = 0x00000000u;
+        write_data_buffer(reinterpret_cast<const uint8_t *>(switch_status),
+                          sizeof(switch_status));
+      } else {
+        if (sdcard_image.empty()) {
+          std::cerr << "[RefCPU] OCSDC read requested but no sdcard image loaded"
+                    << std::endl;
+          std::exit(1);
+        }
+        if (card_offset + total_bytes > sdcard_image.size()) {
+          std::cerr << "[RefCPU] OCSDC read beyond sdcard image: offset=0x"
+                    << std::hex << card_offset << " bytes=0x" << total_bytes
+                    << " image_size=0x" << sdcard_image.size() << std::dec
+                    << std::endl;
+          std::exit(1);
+        }
+        write_data_buffer(sdcard_image.data() + card_offset,
+                          static_cast<uint32_t>(total_bytes));
+      }
+      if (ref_ocsdc_probe_trace_enabled()) {
+        std::cerr << "[REF][t=" << sim_time << "][OCSDC] dma-read opcode="
+                  << std::dec << opcode << " arg=0x" << std::hex << argument
+                  << " blk_size=0x" << blk_size << " blk_count=0x"
+                  << blk_count << " dst=0x" << dst << " first=0x"
+                  << load_word(dst & ~0x3u) << " bytes=0x" << total_bytes
+                  << std::dec << std::endl;
+      }
+    }
+    ocsdc_regs[OCSDC_BASE + 0x3c] = kDatIntCc | kDatIntTrs;
+    ocsdc_data_pending = true;
+    if (ocsdc_read_reg(OCSDC_BASE + 0x40) != 0) {
+      xps_intc_set_irq_level(kOcsdcDatIrqId, true);
+    }
+  }
+
+  if (wants_resp || opcode == 0) {
+    ocsdc_regs[OCSDC_BASE + 0x34] = kCmdIntCc;
+    if (ocsdc_read_reg(OCSDC_BASE + 0x38) != 0) {
+      xps_intc_set_irq_level(kOcsdcCmdIrqId, true);
+    }
+  }
+}
+
+void Ref_cpu::ocsdc_write_reg(uint32_t word_addr, uint32_t data) {
+  switch (word_addr - OCSDC_BASE) {
+  case 0x28:
+    ocsdc_regs[word_addr] = data;
+    if (data & 1u)
+      ocsdc_reset();
+    break;
+  case 0x34:
+    ocsdc_regs[word_addr] = 0;
+    xps_intc_set_irq_level(kOcsdcCmdIrqId, false);
+    break;
+  case 0x3c:
+    ocsdc_regs[word_addr] = 0;
+    xps_intc_set_irq_level(kOcsdcDatIrqId, false);
+    break;
+  case 0x38:
+  case 0x40:
+    ocsdc_regs[word_addr] = data;
+    if (kLogVerboseOcsdcIrqEnable) {
+      std::cerr << "[RefCPU][OCSDC] int_enable off=0x" << std::hex
+                << (word_addr - OCSDC_BASE) << " data=0x" << data
+                << std::dec << std::endl;
+    }
+    if ((word_addr - OCSDC_BASE) == 0x38) {
+      if ((data != 0) && (ocsdc_read_reg(OCSDC_BASE + 0x34) != 0)) {
+        xps_intc_set_irq_level(kOcsdcCmdIrqId, true);
+      } else if (data == 0) {
+        xps_intc_set_irq_level(kOcsdcCmdIrqId, false);
+      }
+    } else {
+      if ((data != 0) && (ocsdc_read_reg(OCSDC_BASE + 0x3c) != 0)) {
+        xps_intc_set_irq_level(kOcsdcDatIrqId, true);
+      } else if (data == 0) {
+        xps_intc_set_irq_level(kOcsdcDatIrqId, false);
+      }
+    }
+    break;
+  case 0x00:
+    ocsdc_regs[word_addr] = data;
+    ocsdc_execute_command(ocsdc_read_reg(OCSDC_BASE + 0x04), data);
+    break;
+  case 0x04:
+    ocsdc_regs[word_addr] = data;
+    break;
+  default:
+    ocsdc_regs[word_addr] = data;
+    break;
+  }
 }
 
 void Ref_cpu::exec(const SimConfig &config) {
   // Initialize Spike Reference Simulator if enabled
 #ifdef ENABLE_SPIKE
   if (config.difftest) {
-    spike_ref = std::make_unique<SpikeRef>("rv32imab_zfinx", 0x80000000, 0x40000000,
+    spike_ref = std::make_unique<SpikeRef>("rv32imab_zfinx", 0x80000000, 0x80000000,
                                            config.image_file.c_str());
   }
 #else
@@ -342,7 +1025,7 @@ void Ref_cpu::exec(const SimConfig &config) {
   // --- 主循环 ---
   while (!sim_end && sim_time < MAX_SIM_TIME) {
 
-    if (sim_time % 100000000 == 0) {
+    if (kLogProgressSimTime && sim_time % 100000000 == 0) {
       std::cout << "SimTime: " << sim_time
                 << " | Intervals: " << finished_intervals << std::endl;
     }
@@ -479,11 +1162,16 @@ void Ref_cpu::exec(const SimConfig &config) {
       current_bb_len = 0;
     }
 
-    // 3. RESTORE 模式的指令数限制检查 (用于跑 Warmup + Sampling)
-    if (config.mode == SimMode::RESTORE && config.max_insts > 0) {
-      restored_inst_count++;
-      if (restored_inst_count >= config.max_insts) {
-        std::cout << "Restore run finished (max_insts reached)." << std::endl;
+    // 3. 指令数限制检查
+    if (config.max_insts > 0) {
+      if (config.mode == SimMode::RESTORE) {
+        restored_inst_count++;
+        if (restored_inst_count >= config.max_insts) {
+          std::cout << "Restore run finished (max_insts reached)." << std::endl;
+          break;
+        }
+      } else if (sim_time >= config.max_insts) {
+        std::cout << "Run finished (max_insts reached)." << std::endl;
         break;
       }
     }
@@ -600,6 +1288,16 @@ void Ref_cpu::exception(uint32_t trap_val) {
                (page_fault_load && medeleg_page_fault_load) ||
                (page_fault_store && medeleg_page_fault_store);
 
+  if (kLogUserSyscallSummary && privilege == RISCV_MODE_U && ecall) {
+    const uint32_t sysno = state.gpr[17];
+    if (sysno == 29 || sysno == 56 || sysno == 57 || sysno == 63 ||
+        sysno == 64 || sysno == 66 || sysno == 221 || sysno == 222) {
+      std::cerr << "[RefCPU][U-SYSCALL] nr=" << sysno << " pc=0x" << std::hex
+                << state.pc << " a0=0x" << state.gpr[10] << " a1=0x"
+                << state.gpr[11] << " a2=0x" << state.gpr[12] << " a3=0x"
+                << state.gpr[13] << std::dec << std::endl;
+    }
+  }
   if (MTrap) {
     state.csr[csr_mepc] = state.pc;
     uint32_t cause = 0;
@@ -633,6 +1331,14 @@ void Ref_cpu::exception(uint32_t trap_val) {
 
     cause |= exception_code;
     state.csr[csr_mcause] = cause;
+    if (kLogVerboseTimer && exception_code == 7) {
+      std::cerr << "[RefCPU][TRAP] M-timer pc=0x" << std::hex << state.pc
+                << " mtvec=0x" << mtvec << " mip=0x" << visible_mip()
+                << " mie=0x" << state.csr[csr_mie]
+                << " cmp=0x" << g_ref_timer_cmp << " now=0x"
+                << ref_timer_now(static_cast<uint32_t>(sim_time)) << std::dec
+                << std::endl;
+    }
 
     // 向量中断跳转
     if ((mtvec & 1) && (cause & (1u << 31))) {
@@ -656,7 +1362,7 @@ void Ref_cpu::exception(uint32_t trap_val) {
     // 同步 sstatus (sstatus 是 mstatus 的影子)
     state.csr[csr_mstatus] = mstatus;
     state.csr[csr_sstatus] =
-        mstatus & 0x800DE762; // 这是一个Mask，简单起见可以直接赋值
+        mstatus & 0x800DE133; // sstatus is the supervisor-visible view of mstatus
 
     privilege = 3; // Machine Mode
     state.csr[csr_mtval] = trap_val;
@@ -688,6 +1394,21 @@ void Ref_cpu::exception(uint32_t trap_val) {
 
     cause |= exception_code;
     state.csr[csr_scause] = cause;
+    if (kLogUserTrapSummary && privilege == RISCV_MODE_U &&
+        !S_software_interrupt && !S_timer_interrupt && !S_external_interrupt) {
+      std::cerr << "[RefCPU][U-TRAP->S] pc=0x" << std::hex << state.pc
+                << " cause=0x" << cause << " tval=0x" << trap_val
+                << " sepc=0x" << state.csr[csr_sepc]
+                << " satp=0x" << state.csr[csr_satp] << std::dec << std::endl;
+    }
+    if (kLogVerboseTimer && exception_code == 5) {
+      std::cerr << "[RefCPU][TRAP] S-timer pc=0x" << std::hex << state.pc
+                << " stvec=0x" << stvec << " mip=0x" << visible_mip()
+                << " mie=0x" << state.csr[csr_mie]
+                << " cmp=0x" << g_ref_timer_cmp << " now=0x"
+                << ref_timer_now(static_cast<uint32_t>(sim_time)) << std::dec
+                << std::endl;
+    }
 
     if ((stvec & 1) && (cause & (1u << 31))) {
       next_pc = (stvec & 0xfffffffc) + 4 * (cause & 0x7fffffff);
@@ -742,6 +1463,15 @@ void Ref_cpu::exception(uint32_t trap_val) {
     state.csr[csr_sstatus] = mstatus & 0x800DE133;
 
     next_pc = state.csr[csr_mepc];
+    if (kLogVerboseReturns &&
+        (next_pc == 0xc033fc6c || next_pc == 0xc033fc70 ||
+         next_pc == 0xc033fc74 || next_pc == 0xc0004f5c)) {
+      std::cerr << "[RefCPU][RET] mret -> pc=0x" << std::hex << next_pc
+                << " priv=" << std::dec << privilege << " mip=0x" << std::hex
+                << visible_mip() << " mie=0x" << state.csr[csr_mie]
+                << " mstatus=0x" << state.csr[csr_mstatus] << std::dec
+                << std::endl;
+    }
 
   } else if (sret) {
     // SIE = SPIE
@@ -765,6 +1495,13 @@ void Ref_cpu::exception(uint32_t trap_val) {
         (state.csr[csr_mstatus] & ~mask) | (sstatus & mask);
 
     next_pc = state.csr[csr_sepc];
+    if (kLogVerboseReturns) {
+      std::cerr << "[RefCPU][RET] sret -> pc=0x" << std::hex << next_pc
+                << " priv=" << std::dec << privilege << " mip=0x" << std::hex
+                << visible_mip() << " mie=0x" << state.csr[csr_mie]
+                << " sstatus=0x" << state.csr[csr_sstatus] << std::dec
+                << std::endl;
+    }
   }
 
   state.pc = next_pc;
@@ -772,7 +1509,7 @@ void Ref_cpu::exception(uint32_t trap_val) {
 
 void Ref_cpu::RISCV() {
   sync_timer_csrs(state, static_cast<uint32_t>(sim_time),
-                  device_effects_enable);
+                  device_effects_enable && interrupt_delivery_enable);
   if (privilege == RISCV_MODE_U) {
     if (current_bb_len == 0) {
       current_bb_head_pc = state.pc;
@@ -800,8 +1537,20 @@ void Ref_cpu::RISCV() {
   check_mem_range_or_log("instruction fetch", p_addr, 4);
   Instruction = load_word(p_addr);
 
+  if (kLogUserEntrySummary && privilege == RISCV_MODE_U &&
+      (state.pc == 0x10000u || state.pc == 0x10428u)) {
+    std::cerr << "[RefCPU][U-ENTRY] pc=0x" << std::hex << state.pc
+              << " sp=0x" << state.gpr[2] << " ra=0x" << state.gpr[1]
+              << " satp=0x" << state.csr[csr_satp] << std::dec << std::endl;
+  }
+
   if (Instruction == INST_EBREAK) {
     uint32_t exit_code = state.gpr[10]; // a0
+    if (kLogUserTrapSummary && privilege == RISCV_MODE_U) {
+      std::cerr << "[RefCPU][U-EBREAK] pc=0x" << std::hex << state.pc
+                << " a0=0x" << exit_code << " sp=0x" << state.gpr[2]
+                << " ra=0x" << state.gpr[1] << std::dec << std::endl;
+    }
     std::cout << "ebreak signal received. code = 0x" << std::hex << exit_code
               << std::dec << std::endl;
     std::cout << "total_sim_time: " << sim_time << std::endl;
@@ -824,12 +1573,43 @@ void Ref_cpu::RISCV() {
   bool mret = (Instruction == INST_MRET);
   bool sret = (Instruction == INST_SRET);
 
+  if (!ref_only && privilege == RISCV_MODE_U && ecall && state.gpr[17] == 64 &&
+      (state.gpr[10] == 1 || state.gpr[10] == 2)) {
+    const uint32_t buf = state.gpr[11];
+    const uint32_t len = state.gpr[12];
+    const uint32_t limit = len > 4096 ? 4096 : len;
+    for (uint32_t i = 0; i < limit; ++i) {
+      uint32_t paddr = buf + i;
+      if ((state.csr[csr_satp] & 0x80000000u) && privilege != RISCV_MODE_M) {
+        if (!va2pa(paddr, buf + i, 1)) {
+          break;
+        }
+      }
+      const uint32_t word = load_word(paddr & ~0x3u);
+      const uint32_t shift = (paddr & 0x3u) * 8u;
+      const char ch = static_cast<char>((word >> shift) & 0xffu);
+      std::cout << ch;
+      if (observe_uart_console_byte(sim_time, ch)) {
+        sim_end = true;
+      }
+    }
+    std::cout.flush();
+    if (sim_end) {
+      return;
+    }
+    state.gpr[10] = len;
+    state.pc += 4;
+    state.gpr[0] = 0;
+    return;
+  }
+
   // === 优化 2: 快速读取 CSR 状态 ===
   uint32_t mstatus = state.csr[csr_mstatus];
   uint32_t mie_reg = state.csr[csr_mie];
   uint32_t mip_reg = ref_effective_mip(state.csr[csr_mip],
                                        static_cast<uint32_t>(sim_time),
-                                       device_effects_enable);
+                                       device_effects_enable &&
+                                           interrupt_delivery_enable);
   uint32_t mideleg = state.csr[csr_mideleg];
   uint32_t medeleg = state.csr[csr_medeleg];
 
@@ -899,13 +1679,30 @@ void Ref_cpu::RISCV() {
 
   asy = MTrap || STrap || mret || sret;
 
-  // WFI 检查 (简单处理)
-  if (Instruction == INST_WFI && !asy && !page_fault_inst && !page_fault_load &&
-      !page_fault_store) {
-    std::cout << "wfi encountered. stopping simulation at sim_time="
-              << sim_time << std::endl;
+  const bool wfi_resume_pending = (mip_reg & mie_reg) != 0;
+
+  // In difftest/ref-only modes, WFI must retire like the DUT model. The DUT
+  // does not sleep the pipeline on WFI during Linux bring-up.
+  if (Instruction == INST_WFI && (ref_only || !device_effects_enable)) {
     state.pc += 4;
-    sim_end = true;
+    state.gpr[0] = 0;
+    return;
+  }
+
+  // WFI sleeps only when there is no pending enabled interrupt source.
+  if (Instruction == INST_WFI && !asy && !wfi_resume_pending &&
+      !page_fault_inst && !page_fault_load && !page_fault_store) {
+    if (kLogVerboseWfi && ((sim_time & 0xfffffu) == 0)) {
+      std::cerr << "[RefCPU][WFI] pc=0x" << std::hex << state.pc
+                << " mip=0x" << visible_mip() << " mie=0x"
+                << state.csr[csr_mie] << " mstatus=0x"
+                << state.csr[csr_mstatus] << " priv=" << std::dec
+                << privilege << " now=0x" << std::hex
+                << ref_timer_now(static_cast<uint32_t>(sim_time))
+                << " cmp=0x" << g_ref_timer_cmp << std::dec << std::endl;
+    }
+    // PC has not been advanced yet in this interpreter path; sleeping WFI
+    // should retry the same instruction, not move to the previous one.
     return;
   }
 
@@ -974,6 +1771,18 @@ void Ref_cpu::RV32CSR() {
     return old_val & ~operand;
   };
 
+  if (funct3 == 0) {
+    const bool is_sfence_vma =
+        BITS(Instruction, 31, 25) == 0b0001001 && rd == 0;
+    if (Instruction == INST_WFI || is_sfence_vma) {
+      state.pc = next_pc;
+      return;
+    }
+    illegal_exception = true;
+    exception(Instruction);
+    return;
+  }
+
   if (csr_addr == number_fflags || csr_addr == number_frm ||
       csr_addr == number_fcsr) {
     uint32_t old_val = 0;
@@ -1014,11 +1823,7 @@ void Ref_cpu::RV32CSR() {
       csr_addr != number_stval && csr_addr != number_sstatus &&
       csr_addr != number_sie && csr_addr != number_sip &&
       csr_addr != number_satp && csr_addr != number_mhartid &&
-      csr_addr != number_misa &&
-      csr_addr != number_time &&
-      csr_addr != number_timeh) {
-    ;
-  } else if (csr_addr == number_time || csr_addr == number_timeh) {
+      csr_addr != number_misa) {
     illegal_exception = true;
     exception(Instruction);
     return;
@@ -1029,12 +1834,14 @@ void Ref_cpu::RV32CSR() {
       if (csr_addr == number_mip) {
         state.gpr[rd] = ref_effective_mip(state.csr[csr_mip],
                                           static_cast<uint32_t>(sim_time),
-                                          device_effects_enable);
+                                          device_effects_enable &&
+                                              interrupt_delivery_enable);
       } else if (csr_addr == number_sip) {
         state.gpr[rd] =
             ref_effective_mip(state.csr[csr_mip],
                               static_cast<uint32_t>(sim_time),
-                              device_effects_enable) &
+                              device_effects_enable &&
+                                  interrupt_delivery_enable) &
             0x00000333u;
       } else {
         state.gpr[rd] = state.csr[csr_idx];
@@ -1046,11 +1853,13 @@ void Ref_cpu::RV32CSR() {
       if (csr_addr == number_mip) {
         old_val = ref_effective_mip(state.csr[csr_mip],
                                     static_cast<uint32_t>(sim_time),
-                                    device_effects_enable);
+                                    device_effects_enable &&
+                                        interrupt_delivery_enable);
       } else if (csr_addr == number_sip) {
         old_val = ref_effective_mip(state.csr[csr_mip],
                                     static_cast<uint32_t>(sim_time),
-                                    device_effects_enable) &
+                                    device_effects_enable &&
+                                        interrupt_delivery_enable) &
                   0x00000333u;
       } else {
         old_val = state.csr[csr_idx];
@@ -1065,7 +1874,7 @@ void Ref_cpu::RV32CSR() {
 
       if (csr_idx == csr_mie || csr_idx == csr_sie) {
         uint32_t mie_mask =
-            0x00000bbb; // MEI(11), SEI(9), MTI(7), STI(5), MSI(3), SSI(1)
+            0x00000aaa; // MEI(11), SEI(9), MTI(7), STI(5), SSI(1)
         uint32_t sie_mask =
             0x00000333; // SEI(9), UEI(8), STI(5), UTI(4), SSI(1), USI(0)
 
@@ -1081,21 +1890,36 @@ void Ref_cpu::RV32CSR() {
         state.csr[csr_sie] = state.csr[csr_mie] & sie_mask;
 
       } else if (csr_idx == csr_mip || csr_idx == csr_sip) {
-        uint32_t mip_mask =
-            0x00000bbb; // MEIP(11), SEIP(9), MTIP(7), STIP(5), MSIP(3), SSIP(1)
+        uint32_t mip_mask = MIP_SEIP | MIP_STIP | MIP_SSIP;
         uint32_t sip_mask =
             0x00000333; // SEIP(9), UEIP(8), STIP(5), UTIP(4), SSIP(1), USIP(0)
 
         if (csr_idx == csr_sip) {
-          // sip: 0x333 (Include User-Level Interrupt bits)
+          const uint32_t writable =
+              (privilege == RISCV_MODE_M) ? mip_mask : static_cast<uint32_t>(MIP_SSIP);
           state.csr[csr_mip] =
-              (state.csr[csr_mip] & ~sip_mask) | (csr_wdata & sip_mask);
+              (state.csr[csr_mip] & ~writable) | (csr_wdata & writable);
         } else {
-          state.csr[csr_mip] = csr_wdata & mip_mask;
+          state.csr[csr_mip] =
+              (state.csr[csr_mip] & ~mip_mask) | (csr_wdata & mip_mask);
         }
         force_sync = true;
-        // sip 始终是 mip 的影子 (masked by 0x333)
-        state.csr[csr_sip] = state.csr[csr_mip] & sip_mask;
+        state.csr[csr_sip] =
+            ref_effective_mip(state.csr[csr_mip],
+                              static_cast<uint32_t>(sim_time),
+                              device_effects_enable &&
+                                  interrupt_delivery_enable) &
+            sip_mask;
+        if (kLogVerboseCsrMip &&
+            ((csr_wdata & (MIP_STIP | MIP_SSIP)) != 0 ||
+             ((old_val ^ state.csr[csr_mip]) & (MIP_STIP | MIP_SSIP)) != 0)) {
+          std::cerr << "[RefCPU][CSR] " << (csr_idx == csr_sip ? "sip" : "mip")
+                    << " <- 0x" << std::hex << csr_wdata
+                    << " old=0x" << old_val << " new_mip=0x"
+                    << state.csr[csr_mip] << " new_sip=0x"
+                    << state.csr[csr_sip] << " pc=0x" << state.pc << std::dec
+                    << std::endl;
+        }
 
       } else if (csr_idx == csr_mstatus || csr_idx == csr_sstatus) {
         uint32_t mstatus_mask = 0x807FF9BB; // ~0x7f800644
@@ -1554,6 +2378,7 @@ void Ref_cpu::RV32IM() {
     } else {
       check_mem_range_or_log("load", p_addr, access_size);
       uint32_t data = load_word(p_addr);
+      const uint32_t raw_word = data;
       uint32_t offset = p_addr & 0b11;
       uint32_t size = funct3 & 0b11;
       uint32_t sign = 0, mask;
@@ -1575,6 +2400,11 @@ void Ref_cpu::RV32IM() {
       // 有符号数
       if (!(funct3 & 0b100)) {
         data = data | sign;
+      }
+
+      if (p_addr >= UART_BASE && p_addr < (UART_BASE + UART_MMIO_SIZE)) {
+        trace_uart_load(sim_time, state.pc, p_addr, static_cast<uint8_t>(funct3),
+                        raw_word, data);
       }
 
       if (device_effects_enable && p_addr == TIMER_BASE) {
@@ -1956,6 +2786,20 @@ uint32_t Ref_cpu::load_word(uint32_t addr) const {
   }
 
   check_mem_range_or_log("word load", word_addr, 4);
+  if (word_addr >= UART_BASE && word_addr < (UART_BASE + UART_MMIO_SIZE)) {
+    auto it = io_words.find(word_addr);
+    if (it == io_words.end()) {
+      return 0;
+    }
+    return it->second;
+  }
+  if (word_addr >= XPS_INTC_BASE &&
+      word_addr < (XPS_INTC_BASE + XPS_INTC_MMIO_SIZE)) {
+    return xps_intc_read_reg(word_addr);
+  }
+  if (word_addr >= OCSDC_BASE && word_addr < (OCSDC_BASE + OCSDC_MMIO_SIZE)) {
+    return ocsdc_read_reg(word_addr);
+  }
   auto it = io_words.find(word_addr);
   return (it == io_words.end()) ? 0 : it->second;
 }
@@ -1981,11 +2825,23 @@ void Ref_cpu::store_word(uint32_t addr, uint32_t data) {
   if (device_effects_enable && word_addr == (TIMER_BASE + 8u)) {
     g_ref_timer_cmp = (g_ref_timer_cmp & 0xFFFFFFFF00000000ull) |
                       static_cast<uint64_t>(data);
+    if (kLogVerboseTimer) {
+      std::cerr << "[RefCPU][TIMER] mtimecmp_lo <- 0x" << std::hex << data
+                << " full=0x" << g_ref_timer_cmp << " now=0x"
+                << ref_timer_now(static_cast<uint32_t>(sim_time)) << std::dec
+                << std::endl;
+    }
     return;
   }
   if (device_effects_enable && word_addr == (TIMER_BASE + 12u)) {
     g_ref_timer_cmp = (static_cast<uint64_t>(data) << 32) |
                       (g_ref_timer_cmp & 0x00000000FFFFFFFFull);
+    if (kLogVerboseTimer) {
+      std::cerr << "[RefCPU][TIMER] mtimecmp_hi <- 0x" << std::hex << data
+                << " full=0x" << g_ref_timer_cmp << " now=0x"
+                << ref_timer_now(static_cast<uint32_t>(sim_time)) << std::dec
+                << std::endl;
+    }
     return;
   }
   if (is_ram_range(word_addr, 4)) {
@@ -1994,6 +2850,19 @@ void Ref_cpu::store_word(uint32_t addr, uint32_t data) {
   }
 
   check_mem_range_or_log("word store", word_addr, 4);
+  if (word_addr >= UART_BASE && word_addr < (UART_BASE + UART_MMIO_SIZE)) {
+    io_words[word_addr] = data;
+    return;
+  }
+  if (word_addr >= XPS_INTC_BASE &&
+      word_addr < (XPS_INTC_BASE + XPS_INTC_MMIO_SIZE)) {
+    xps_intc_write_reg(word_addr, data);
+    return;
+  }
+  if (word_addr >= OCSDC_BASE && word_addr < (OCSDC_BASE + OCSDC_MMIO_SIZE)) {
+    ocsdc_write_reg(word_addr, data);
+    return;
+  }
   io_words[word_addr] = data;
 }
 
@@ -2009,6 +2878,11 @@ void Ref_cpu::store_data() {
   int offset = p_addr & 0x3;
   uint32_t wstrb = state.store_strb << offset;
   uint32_t wdata = state.store_data << (offset * 8);
+  const bool trace_uart =
+      p_addr >= UART_BASE && p_addr < (UART_BASE + UART_MMIO_SIZE);
+  const uint32_t trace_uart_pc = state.pc;
+  const uint32_t trace_uart_before0 =
+      trace_uart ? load_word(UART_BASE) : 0u;
   uint32_t old_data = load_word(p_addr);
   uint32_t mask = 0;
 
@@ -2025,36 +2899,53 @@ void Ref_cpu::store_data() {
     store_word(p_addr, (mask & wdata) | (~mask & old_data));
   }
 
-  if (device_effects_enable && p_addr == UART_BASE) {
-    char temp;
-    temp = wdata & 0x000000ff;
-    store_word(0x10000000, load_word(0x10000000) & 0xffffff00);
-    if (uart_print) {
-      std::cout << temp;
+  if (device_effects_enable && p_addr >= UART_BASE &&
+      p_addr < (UART_BASE + UART_MMIO_SIZE)) {
+    const uint32_t reg = p_addr - UART_BASE;
+    const uint8_t value =
+        static_cast<uint8_t>((wdata >> (offset * 8)) & 0xffu);
+    const uint8_t lcr = uart_read_reg8(io_words, UART_BASE + kUartRegLcr);
+    const bool dlab = (lcr & kUartLcrDlab) != 0;
+
+    if (reg == kUartRegRxTxDll && !dlab) {
+      uart_write_reg8(io_words, UART_BASE + kUartRegRxTxDll, 0);
+      uart_write_reg8(io_words, UART_BASE + kUartRegLsr,
+                      kUartLsrThre | kUartLsrTemt);
+      if (uart_print && privilege != RISCV_MODE_U &&
+          !g_disable_uart_console_output) {
+        const char ch = static_cast<char>(value);
+        std::cout << ch << std::flush;
+        if (observe_uart_console_byte(sim_time, ch)) {
+          sim_end = true;
+        }
+      }
+      uart_refresh_interrupt();
+    } else if (reg == kUartRegRxTxDll && dlab) {
+      uart_write_reg8(io_words, UART_BASE + kUartRegRxTxDll, value);
+    } else if (reg == kUartRegIerDlm && dlab) {
+      uart_write_reg8(io_words, UART_BASE + kUartRegIerDlm, value);
+    } else if (reg == kUartRegIerDlm && !dlab) {
+      uart_write_reg8(io_words, UART_BASE + kUartRegIerDlm, value);
+      uart_refresh_interrupt();
+    } else if (reg == kUartRegIirFcr) {
+      uart_write_reg8(io_words, UART_BASE + kUartRegIirFcr,
+                      static_cast<uint8_t>(kUartIirNoInt |
+                                           kUartIirFifoEnabled));
+      uart_refresh_interrupt();
+    } else if (reg == kUartRegLcr) {
+      uart_write_reg8(io_words, UART_BASE + kUartRegLcr, value);
+    } else if (reg == kUartRegMcr) {
+      uart_write_reg8(io_words, UART_BASE + kUartRegMcr, value);
+    } else if (reg == kUartRegScr) {
+      uart_write_reg8(io_words, UART_BASE + kUartRegScr, value);
     }
   }
 
-  if (device_effects_enable && p_addr == 0x10000001 &&
-      (state.store_data & 0x000000ff) == 7) {
-    store_word(0xc201004, 0xa);
-    store_word(0x10000000, load_word(0x10000000) & 0xfff0ffff);
-
-    state.csr[csr_mip] = state.csr[csr_mip] | MIP_MEIP;
-    state.csr[csr_sip] = state.csr[csr_mip] & 0x00000333u;
-    force_sync = true;
-  }
-
-  if (device_effects_enable && p_addr == 0x10000001 &&
-      (state.store_data & 0x000000ff) == 5) {
-    store_word(0x10000000, (load_word(0x10000000) & 0xfff0ffff) | 0x00030000);
-  }
-
-  if (device_effects_enable && p_addr == 0xc201004 &&
-      (state.store_data & 0x000000ff) == 0xa) {
-    store_word(0xc201004, 0x0);
-    state.csr[csr_mip] = state.csr[csr_mip] & ~MIP_MEIP;
-    state.csr[csr_sip] = state.csr[csr_mip] & 0x00000333u;
-    force_sync = true;
+  if (trace_uart) {
+    trace_uart_store_effect(sim_time, trace_uart_pc, p_addr,
+                            static_cast<uint8_t>(wstrb), wdata,
+                            trace_uart_before0, load_word(UART_BASE),
+                            load_word(UART_BASE + 4u));
   }
 
   state.store_data = state.store_data << offset * 8;

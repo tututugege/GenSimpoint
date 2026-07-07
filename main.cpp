@@ -18,6 +18,12 @@ int main(int argc, char *argv[]) {
       std::string arg = argv[i];
       if (arg == "--image")
         config.image_file = argv[++i];
+      else if (arg == "--flash-image")
+        config.flash_image_file = argv[++i];
+      else if (arg == "--sdcard-image")
+        config.sdcard_image_file = argv[++i];
+      else if (arg == "--reset-pc")
+        config.reset_pc = static_cast<uint32_t>(std::stoul(argv[++i], nullptr, 0));
 
       // 模式选择
       else if (arg == "--mode") {
@@ -62,8 +68,18 @@ int main(int argc, char *argv[]) {
   }
 #endif
 
-  ref_cpu.init(0, config.image_file.c_str(), PHYSICAL_MEMORY_LENGTH);
+  ref_cpu.init(config.reset_pc,
+               config.image_file.empty() ? nullptr : config.image_file.c_str(),
+               PHYSICAL_MEMORY_LENGTH);
+  if (!config.flash_image_file.empty())
+    ref_cpu.load_flash_image(config.flash_image_file);
+  if (!config.sdcard_image_file.empty())
+    ref_cpu.load_sdcard_image(config.sdcard_image_file);
   ref_cpu.uart_print = true;
+  if (const char *env = std::getenv("REF_FORCE_REF_ONLY");
+      env != nullptr && env[0] != '\0' && env[0] != '0') {
+    ref_cpu.ref_only = true;
+  }
   ref_cpu.exec(config);
 
   return 0;
