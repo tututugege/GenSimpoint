@@ -71,66 +71,26 @@ bool prepare_forced_interrupt(Ref_cpu &cpu, uint32_t cause,
       (pending_snapshot & kPendingMask);
   cpu.state.csr[csr_sip] = cpu.state.csr[csr_mip] & 0x00000333u;
 
+  cpu.evaluate_interrupts(cpu.state.csr[csr_mip]);
+
+  uint8_t selected_privilege = 0xffu;
+  uint32_t selected_code = 0;
+  if (cpu.M_software_interrupt || cpu.M_timer_interrupt ||
+      cpu.M_external_interrupt) {
+    selected_privilege = RISCV_MODE_M;
+    selected_code = cpu.M_software_interrupt ? 3u
+                    : cpu.M_timer_interrupt  ? 7u
+                                             : 11u;
+  } else if (cpu.S_software_interrupt || cpu.S_timer_interrupt ||
+             cpu.S_external_interrupt) {
+    selected_privilege = RISCV_MODE_S;
+    selected_code = cpu.S_external_interrupt ? 9u
+                    : cpu.S_timer_interrupt   ? 5u
+                                              : 1u;
+  }
+
   const uint32_t code = cause & ~kInterruptBit;
-  const uint32_t mstatus = cpu.state.csr[csr_mstatus];
-  const uint32_t mie = cpu.state.csr[csr_mie];
-  const uint32_t mip = cpu.state.csr[csr_mip];
-  const uint32_t mideleg = cpu.state.csr[csr_mideleg];
-  const bool m_global = cpu.privilege < RISCV_MODE_M ||
-                        (mstatus & MSTATUS_MIE) != 0;
-  const bool s_global = cpu.privilege < RISCV_MODE_S ||
-                        (cpu.privilege == RISCV_MODE_S &&
-                         (mstatus & MSTATUS_SIE) != 0);
-
-  cpu.M_software_interrupt = false;
-  cpu.M_timer_interrupt = false;
-  cpu.M_external_interrupt = false;
-  cpu.S_software_interrupt = false;
-  cpu.S_timer_interrupt = false;
-  cpu.S_external_interrupt = false;
-
-  if (target_privilege == RISCV_MODE_M) {
-    uint32_t bit = 0;
-    if (code == 3u) {
-      bit = MIP_MSIP;
-      cpu.M_software_interrupt = true;
-    } else if (code == 7u) {
-      bit = MIP_MTIP;
-      cpu.M_timer_interrupt = true;
-    } else if (code == 11u) {
-      bit = MIP_MEIP;
-      cpu.M_external_interrupt = true;
-    } else {
-      return false;
-    }
-    if ((mip & bit) == 0 || (mie & bit) == 0 || (mideleg & bit) != 0 ||
-        !m_global) {
-      return false;
-    }
-  } else if (target_privilege == RISCV_MODE_S) {
-    bool eligible = false;
-    if (code == 1u) {
-      eligible = (((mip & MIP_MSIP) && (mie & MIP_MSIP) &&
-                   (mideleg & MIP_MSIP)) ||
-                  ((mip & MIP_SSIP) && (mie & MIP_SSIP)));
-      cpu.S_software_interrupt = true;
-    } else if (code == 5u) {
-      eligible = (((mip & MIP_MTIP) && (mie & MIP_MTIP) &&
-                   (mideleg & MIP_MTIP)) ||
-                  ((mip & MIP_STIP) && (mie & MIP_STIP)));
-      cpu.S_timer_interrupt = true;
-    } else if (code == 9u) {
-      eligible = (((mip & MIP_MEIP) && (mie & MIP_MEIP) &&
-                   (mideleg & MIP_MEIP)) ||
-                  ((mip & MIP_SEIP) && (mie & MIP_SEIP)));
-      cpu.S_external_interrupt = true;
-    } else {
-      return false;
-    }
-    if (!eligible || cpu.privilege >= RISCV_MODE_M || !s_global) {
-      return false;
-    }
-  } else {
+  if (selected_privilege != target_privilege || selected_code != code) {
     return false;
   }
 

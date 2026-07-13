@@ -221,6 +221,7 @@ public:
   uint32_t xps_intc_mer = 0;
 
   void init(uint32_t reset_pc, const char *image, uint32_t size);
+  void evaluate_interrupts(uint32_t mip_reg);
   void load_flash_image(const std::string &path);
   void load_sdcard_image(const std::string &path);
   void ocsdc_reset();

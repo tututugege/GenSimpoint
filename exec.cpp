@@ -1507,6 +1507,43 @@ void Ref_cpu::exception(uint32_t trap_val) {
   state.pc = next_pc;
 }
 
+void Ref_cpu::evaluate_interrupts(uint32_t mip_reg) {
+  const uint32_t mstatus = state.csr[csr_mstatus];
+  const uint32_t mie_reg = state.csr[csr_mie];
+  const uint32_t mideleg = state.csr[csr_mideleg];
+  const bool mstatus_mie = (mstatus & MSTATUS_MIE) != 0;
+  const bool mstatus_sie = (mstatus & MSTATUS_SIE) != 0;
+
+  M_software_interrupt = (mip_reg & MIP_MSIP) && (mie_reg & MIP_MSIP) &&
+                         !(mideleg & MIP_MSIP) &&
+                         (privilege < RISCV_MODE_M || mstatus_mie);
+  M_timer_interrupt = (mip_reg & MIP_MTIP) && (mie_reg & MIP_MTIP) &&
+                      !(mideleg & MIP_MTIP) &&
+                      (privilege < RISCV_MODE_M || mstatus_mie);
+  M_external_interrupt = (mip_reg & MIP_MEIP) && (mie_reg & MIP_MEIP) &&
+                         !(mideleg & MIP_MEIP) &&
+                         (privilege < RISCV_MODE_M || mstatus_mie);
+
+  const bool s_irq_enable =
+      privilege < RISCV_MODE_S ||
+      (privilege == RISCV_MODE_S && mstatus_sie);
+  S_software_interrupt =
+      (((mip_reg & MIP_MSIP) && (mie_reg & MIP_MSIP) &&
+        (mideleg & MIP_MSIP)) ||
+       ((mip_reg & MIP_SSIP) && (mie_reg & MIP_SSIP))) &&
+      privilege < RISCV_MODE_M && s_irq_enable;
+  S_timer_interrupt =
+      (((mip_reg & MIP_MTIP) && (mie_reg & MIP_MTIP) &&
+        (mideleg & MIP_MTIP)) ||
+       ((mip_reg & MIP_STIP) && (mie_reg & MIP_STIP))) &&
+      privilege < RISCV_MODE_M && s_irq_enable;
+  S_external_interrupt =
+      (((mip_reg & MIP_MEIP) && (mie_reg & MIP_MEIP) &&
+        (mideleg & MIP_MEIP)) ||
+       ((mip_reg & MIP_SEIP) && (mie_reg & MIP_SEIP))) &&
+      privilege < RISCV_MODE_M && s_irq_enable;
+}
+
 void Ref_cpu::RISCV() {
   sync_timer_csrs(state, static_cast<uint32_t>(sim_time),
                   device_effects_enable && interrupt_delivery_enable);
@@ -1604,7 +1641,6 @@ void Ref_cpu::RISCV() {
   }
 
   // === 优化 2: 快速读取 CSR 状态 ===
-  uint32_t mstatus = state.csr[csr_mstatus];
   uint32_t mie_reg = state.csr[csr_mie];
   uint32_t mip_reg = ref_effective_mip(state.csr[csr_mip],
                                        static_cast<uint32_t>(sim_time),
@@ -1613,12 +1649,7 @@ void Ref_cpu::RISCV() {
   if (!interrupt_delivery_enable) {
     mip_reg = 0;
   }
-  uint32_t mideleg = state.csr[csr_mideleg];
   uint32_t medeleg = state.csr[csr_medeleg];
-
-  // 提取关键位
-  bool mstatus_mie = (mstatus & MSTATUS_MIE) != 0;
-  bool mstatus_sie = (mstatus & MSTATUS_SIE) != 0;
 
   // 异常委托位 (Exceptions)
   bool medeleg_U_ecall = (medeleg >> 8) & 1;
@@ -1629,42 +1660,7 @@ void Ref_cpu::RISCV() {
   bool medeleg_page_fault_load = (medeleg >> 13) & 1;
   bool medeleg_page_fault_store = (medeleg >> 15) & 1;
 
-  // === 优化 3: 中断判断逻辑 (位运算) ===
-  // M-mode 中断条件:Pending & Enabled & NotDelegated & (CurrentPriv < M ||
-  // MIE=1)
-
-  // Software Interrupts
-  M_software_interrupt = (mip_reg & MIP_MSIP) && (mie_reg & MIP_MSIP) &&
-                         !(mideleg & MIP_MSIP) &&
-                         (privilege < 3 || mstatus_mie);
-
-  // Timer Interrupts
-  M_timer_interrupt = (mip_reg & MIP_MTIP) && (mie_reg & MIP_MTIP) &&
-                      !(mideleg & MIP_MTIP) && (privilege < 3 || mstatus_mie);
-
-  // External Interrupts
-  M_external_interrupt = (mip_reg & MIP_MEIP) && (mie_reg & MIP_MEIP) &&
-                         !(mideleg & MIP_MEIP) &&
-                         (privilege < 3 || mstatus_mie);
-
-  // S-mode 中断条件: Pending & Enabled & Delegated & (CurrentPriv < S || SIE=1)
-  // 注意：privilege < 2 (S-mode=1, U-mode=0) 意味着当前是 U 或 S
-  bool s_irq_enable = (privilege < 1 || (privilege == 1 && mstatus_sie));
-
-  S_software_interrupt =
-      (((mip_reg & MIP_MSIP) && (mie_reg & MIP_MSIP) && (mideleg & MIP_MSIP)) ||
-       ((mip_reg & MIP_SSIP) && (mie_reg & MIP_SSIP))) &&
-      (privilege < 2 && s_irq_enable);
-
-  S_timer_interrupt =
-      (((mip_reg & MIP_MTIP) && (mie_reg & MIP_MTIP) && (mideleg & MIP_MTIP)) ||
-       ((mip_reg & MIP_STIP) && (mie_reg & MIP_STIP))) &&
-      (privilege < 2 && s_irq_enable);
-
-  S_external_interrupt =
-      (((mip_reg & MIP_MEIP) && (mie_reg & MIP_MEIP) && (mideleg & MIP_MEIP)) ||
-       ((mip_reg & MIP_SEIP) && (mie_reg & MIP_SEIP))) &&
-      (privilege < 2 && s_irq_enable);
+  evaluate_interrupts(mip_reg);
 
   // Trap 判断
   bool MTrap =
