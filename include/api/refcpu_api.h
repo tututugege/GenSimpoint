@@ -63,6 +63,13 @@ void refcpu_set_uart_print(RefCpuContext *ctx, bool enable);
 void refcpu_set_ref_only(RefCpuContext *ctx, bool enable);
 void refcpu_set_device_effects(RefCpuContext *ctx, bool enable);
 void refcpu_set_interrupt_delivery(RefCpuContext *ctx, bool enable);
+void refcpu_set_next_mmio_read(RefCpuContext *ctx, uint32_t paddr,
+                               uint32_t result);
+void refcpu_set_next_csr_read(RefCpuContext *ctx, uint32_t csr_addr,
+                              uint32_t value);
+bool refcpu_take_forced_interrupt(RefCpuContext *ctx, uint32_t cause,
+                                  uint8_t target_privilege,
+                                  uint32_t pending_snapshot);
 void refcpu_set_sim_end(RefCpuContext *ctx, bool value);
 void refcpu_set_sim_time(RefCpuContext *ctx, uint64_t sim_time);
 

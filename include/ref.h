@@ -206,6 +206,12 @@ public:
   bool ref_only = false;
   bool device_effects_enable = true;
   bool interrupt_delivery_enable = true;
+  bool external_mmio_read_valid = false;
+  uint32_t external_mmio_read_addr = 0;
+  uint32_t external_mmio_read_result = 0;
+  bool external_csr_read_valid = false;
+  uint32_t external_csr_read_addr = 0;
+  uint32_t external_csr_read_value = 0;
   std::vector<uint8_t> flash_image;
   std::vector<uint8_t> sdcard_image;
   std::unordered_map<uint32_t, uint32_t> ocsdc_regs;

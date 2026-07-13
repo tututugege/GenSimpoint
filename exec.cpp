@@ -1610,6 +1610,9 @@ void Ref_cpu::RISCV() {
                                        static_cast<uint32_t>(sim_time),
                                        device_effects_enable &&
                                            interrupt_delivery_enable);
+  if (!interrupt_delivery_enable) {
+    mip_reg = 0;
+  }
   uint32_t mideleg = state.csr[csr_mideleg];
   uint32_t medeleg = state.csr[csr_medeleg];
 
@@ -1830,40 +1833,32 @@ void Ref_cpu::RV32CSR() {
   } else {
 
     int csr_idx = cvt_number_to_csr(csr_addr);
+    const bool use_external_csr_read =
+        external_csr_read_valid && external_csr_read_addr == csr_addr;
+    uint32_t observed_csr_value = 0;
+    if (use_external_csr_read) {
+      observed_csr_value = external_csr_read_value;
+    } else if (csr_addr == number_mip) {
+      observed_csr_value =
+          ref_effective_mip(state.csr[csr_mip],
+                            static_cast<uint32_t>(sim_time),
+                            device_effects_enable && interrupt_delivery_enable);
+    } else if (csr_addr == number_sip) {
+      observed_csr_value =
+          ref_effective_mip(state.csr[csr_mip],
+                            static_cast<uint32_t>(sim_time),
+                            device_effects_enable && interrupt_delivery_enable) &
+          0x00000333u;
+    } else {
+      observed_csr_value = state.csr[csr_idx];
+    }
+
     if (re) {
-      if (csr_addr == number_mip) {
-        state.gpr[rd] = ref_effective_mip(state.csr[csr_mip],
-                                          static_cast<uint32_t>(sim_time),
-                                          device_effects_enable &&
-                                              interrupt_delivery_enable);
-      } else if (csr_addr == number_sip) {
-        state.gpr[rd] =
-            ref_effective_mip(state.csr[csr_mip],
-                              static_cast<uint32_t>(sim_time),
-                              device_effects_enable &&
-                                  interrupt_delivery_enable) &
-            0x00000333u;
-      } else {
-        state.gpr[rd] = state.csr[csr_idx];
-      }
+      state.gpr[rd] = observed_csr_value;
     }
 
     if (we) {
-      uint32_t old_val = 0;
-      if (csr_addr == number_mip) {
-        old_val = ref_effective_mip(state.csr[csr_mip],
-                                    static_cast<uint32_t>(sim_time),
-                                    device_effects_enable &&
-                                        interrupt_delivery_enable);
-      } else if (csr_addr == number_sip) {
-        old_val = ref_effective_mip(state.csr[csr_mip],
-                                    static_cast<uint32_t>(sim_time),
-                                    device_effects_enable &&
-                                        interrupt_delivery_enable) &
-                  0x00000333u;
-      } else {
-        old_val = state.csr[csr_idx];
-      }
+      uint32_t old_val = observed_csr_value;
       if (wcmd == CSR_W) {
         csr_wdata = wdata;
       } else if (wcmd == CSR_S) {
@@ -1940,6 +1935,9 @@ void Ref_cpu::RV32CSR() {
       } else {
         state.csr[csr_idx] = csr_wdata;
       }
+    }
+    if (use_external_csr_read) {
+      external_csr_read_valid = false;
     }
   }
 
@@ -2376,6 +2374,17 @@ void Ref_cpu::RV32IM() {
       return;
 
     } else {
+      if (external_mmio_read_valid) {
+        if (p_addr != external_mmio_read_addr) {
+          std::cerr << "[RefCPU] injected MMIO read address mismatch: expected=0x"
+                    << std::hex << external_mmio_read_addr << " actual=0x"
+                    << p_addr << std::dec << std::endl;
+          std::abort();
+        }
+        state.gpr[reg_d_index] = external_mmio_read_result;
+        external_mmio_read_valid = false;
+        break;
+      }
       check_mem_range_or_log("load", p_addr, access_size);
       uint32_t data = load_word(p_addr);
       const uint32_t raw_word = data;
@@ -2895,7 +2904,9 @@ void Ref_cpu::store_data() {
   if (wstrb & 0b1000)
     mask |= 0xFF000000;
 
-  if (state.store) {
+  const bool suppress_external_device_store =
+      !device_effects_enable && !is_ram_range(p_addr & ~0x3u, 4);
+  if (state.store && !suppress_external_device_store) {
     store_word(p_addr, (mask & wdata) | (~mask & old_data));
   }
 

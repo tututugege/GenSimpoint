@@ -17,11 +17,6 @@ struct RefCpuContextImpl {
   SimConfig cfg;
 };
 
-void suppress_timer_pending(Ref_cpu &cpu) {
-  cpu.state.csr[csr_mip] &= ~MIP_MTIP;
-  cpu.state.csr[csr_sip] = cpu.state.csr[csr_mip] & 0x00000333u;
-}
-
 RefCpuState export_state(const Ref_cpu &cpu) {
   RefCpuState state{};
   std::memcpy(state.gpr, cpu.state.gpr, sizeof(state.gpr));
@@ -45,13 +40,9 @@ RefCpuState export_state(const Ref_cpu &cpu) {
   return state;
 }
 
-void import_state(Ref_cpu &cpu, const RefCpuState &state,
-                  bool suppress_timer_interrupt) {
+void import_state(Ref_cpu &cpu, const RefCpuState &state) {
   std::memcpy(cpu.state.gpr, state.gpr, sizeof(cpu.state.gpr));
   std::memcpy(cpu.state.csr, state.csr, sizeof(cpu.state.csr));
-  if (suppress_timer_interrupt) {
-    suppress_timer_pending(cpu);
-  }
   cpu.state.pc = state.pc;
   cpu.state.store_addr = state.store_addr;
   cpu.state.store_data = state.store_data;
@@ -64,6 +55,97 @@ void import_state(Ref_cpu &cpu, const RefCpuState &state,
   cpu.page_fault_load = state.page_fault_load;
   cpu.page_fault_store = state.page_fault_store;
   cpu.privilege = state.privilege;
+}
+
+bool prepare_forced_interrupt(Ref_cpu &cpu, uint32_t cause,
+                              uint8_t target_privilege,
+                              uint32_t pending_snapshot) {
+  constexpr uint32_t kInterruptBit = 1u << 31;
+  if ((cause & kInterruptBit) == 0) {
+    return false;
+  }
+
+  constexpr uint32_t kPendingMask = 0x00000bbbu;
+  cpu.state.csr[csr_mip] =
+      (cpu.state.csr[csr_mip] & ~kPendingMask) |
+      (pending_snapshot & kPendingMask);
+  cpu.state.csr[csr_sip] = cpu.state.csr[csr_mip] & 0x00000333u;
+
+  const uint32_t code = cause & ~kInterruptBit;
+  const uint32_t mstatus = cpu.state.csr[csr_mstatus];
+  const uint32_t mie = cpu.state.csr[csr_mie];
+  const uint32_t mip = cpu.state.csr[csr_mip];
+  const uint32_t mideleg = cpu.state.csr[csr_mideleg];
+  const bool m_global = cpu.privilege < RISCV_MODE_M ||
+                        (mstatus & MSTATUS_MIE) != 0;
+  const bool s_global = cpu.privilege < RISCV_MODE_S ||
+                        (cpu.privilege == RISCV_MODE_S &&
+                         (mstatus & MSTATUS_SIE) != 0);
+
+  cpu.M_software_interrupt = false;
+  cpu.M_timer_interrupt = false;
+  cpu.M_external_interrupt = false;
+  cpu.S_software_interrupt = false;
+  cpu.S_timer_interrupt = false;
+  cpu.S_external_interrupt = false;
+
+  if (target_privilege == RISCV_MODE_M) {
+    uint32_t bit = 0;
+    if (code == 3u) {
+      bit = MIP_MSIP;
+      cpu.M_software_interrupt = true;
+    } else if (code == 7u) {
+      bit = MIP_MTIP;
+      cpu.M_timer_interrupt = true;
+    } else if (code == 11u) {
+      bit = MIP_MEIP;
+      cpu.M_external_interrupt = true;
+    } else {
+      return false;
+    }
+    if ((mip & bit) == 0 || (mie & bit) == 0 || (mideleg & bit) != 0 ||
+        !m_global) {
+      return false;
+    }
+  } else if (target_privilege == RISCV_MODE_S) {
+    bool eligible = false;
+    if (code == 1u) {
+      eligible = (((mip & MIP_MSIP) && (mie & MIP_MSIP) &&
+                   (mideleg & MIP_MSIP)) ||
+                  ((mip & MIP_SSIP) && (mie & MIP_SSIP)));
+      cpu.S_software_interrupt = true;
+    } else if (code == 5u) {
+      eligible = (((mip & MIP_MTIP) && (mie & MIP_MTIP) &&
+                   (mideleg & MIP_MTIP)) ||
+                  ((mip & MIP_STIP) && (mie & MIP_STIP)));
+      cpu.S_timer_interrupt = true;
+    } else if (code == 9u) {
+      eligible = (((mip & MIP_MEIP) && (mie & MIP_MEIP) &&
+                   (mideleg & MIP_MEIP)) ||
+                  ((mip & MIP_SEIP) && (mie & MIP_SEIP)));
+      cpu.S_external_interrupt = true;
+    } else {
+      return false;
+    }
+    if (!eligible || cpu.privilege >= RISCV_MODE_M || !s_global) {
+      return false;
+    }
+  } else {
+    return false;
+  }
+
+  cpu.Instruction = 0;
+  cpu.state.store = false;
+  cpu.state.store_addr = 0;
+  cpu.state.store_data = 0;
+  cpu.state.store_strb = 0;
+  cpu.page_fault_inst = false;
+  cpu.page_fault_load = false;
+  cpu.page_fault_store = false;
+  cpu.illegal_exception = false;
+  cpu.is_io = false;
+  cpu.force_sync = false;
+  return true;
 }
 
 } // namespace
@@ -113,7 +195,9 @@ void refcpu_set_state(RefCpuContext *ctx, const RefCpuState *state) {
   if (ctx == nullptr || state == nullptr) {
     return;
   }
-  import_state(ctx->cpu, *state, !ctx->cpu.interrupt_delivery_enable);
+  import_state(ctx->cpu, *state);
+  ctx->cpu.external_mmio_read_valid = false;
+  ctx->cpu.external_csr_read_valid = false;
 }
 
 void refcpu_get_step_info(const RefCpuContext *ctx, RefCpuStepInfo *info) {
@@ -213,9 +297,44 @@ void refcpu_set_interrupt_delivery(RefCpuContext *ctx, bool enable) {
     return;
   }
   ctx->cpu.interrupt_delivery_enable = enable;
-  if (!enable) {
-    suppress_timer_pending(ctx->cpu);
+}
+
+void refcpu_set_next_mmio_read(RefCpuContext *ctx, uint32_t paddr,
+                               uint32_t result) {
+  if (ctx == nullptr) {
+    return;
   }
+  ctx->cpu.external_mmio_read_valid = true;
+  ctx->cpu.external_mmio_read_addr = paddr;
+  ctx->cpu.external_mmio_read_result = result;
+}
+
+void refcpu_set_next_csr_read(RefCpuContext *ctx, uint32_t csr_addr,
+                              uint32_t value) {
+  if (ctx == nullptr) {
+    return;
+  }
+  ctx->cpu.external_csr_read_valid = true;
+  ctx->cpu.external_csr_read_addr = csr_addr;
+  ctx->cpu.external_csr_read_value = value;
+}
+
+bool refcpu_take_forced_interrupt(RefCpuContext *ctx, uint32_t cause,
+                                  uint8_t target_privilege,
+                                  uint32_t pending_snapshot) {
+  if (ctx == nullptr ||
+      !prepare_forced_interrupt(ctx->cpu, cause, target_privilege,
+                                pending_snapshot)) {
+    return false;
+  }
+  ctx->cpu.exception(0);
+  ctx->cpu.M_software_interrupt = false;
+  ctx->cpu.M_timer_interrupt = false;
+  ctx->cpu.M_external_interrupt = false;
+  ctx->cpu.S_software_interrupt = false;
+  ctx->cpu.S_timer_interrupt = false;
+  ctx->cpu.S_external_interrupt = false;
+  return true;
 }
 
 void refcpu_set_sim_end(RefCpuContext *ctx, bool value) {
