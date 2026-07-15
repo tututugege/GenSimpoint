@@ -212,7 +212,6 @@ public:
   bool ref_only = false;
   bool device_effects_enable = true;
   bool interrupt_delivery_enable = true;
-  ReadOverride external_mmio_read;
   ReadOverride external_csr_read;
   std::vector<uint8_t> flash_image;
   std::vector<uint8_t> sdcard_image;

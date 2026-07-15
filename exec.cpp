@@ -2422,17 +2422,6 @@ void Ref_cpu::RV32IM() {
       return;
 
     } else {
-      if (external_mmio_read.valid) {
-        if (p_addr != external_mmio_read.address) {
-          std::cerr << "[RefCPU] injected MMIO read address mismatch: expected=0x"
-                    << std::hex << external_mmio_read.address << " actual=0x"
-                    << p_addr << std::dec << std::endl;
-          std::abort();
-        }
-        state.gpr[reg_d_index] = external_mmio_read.value;
-        external_mmio_read = {};
-        break;
-      }
       check_mem_range_or_log("load", p_addr, access_size);
       uint32_t data = load_word(p_addr);
       const uint32_t raw_word = data;

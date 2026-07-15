@@ -105,7 +105,6 @@ void refcpu_set_state(RefCpuContext *ctx, const RefCpuState *state) {
     return;
   }
   import_state(ctx->cpu, *state);
-  ctx->cpu.external_mmio_read = {};
   ctx->cpu.external_csr_read = {};
 }
 
@@ -206,14 +205,6 @@ void refcpu_set_interrupt_delivery(RefCpuContext *ctx, bool enable) {
     return;
   }
   ctx->cpu.interrupt_delivery_enable = enable;
-}
-
-void refcpu_set_next_mmio_read(RefCpuContext *ctx, uint32_t paddr,
-                               uint32_t result) {
-  if (ctx == nullptr) {
-    return;
-  }
-  ctx->cpu.external_mmio_read = {true, paddr, result};
 }
 
 void refcpu_set_next_csr_read(RefCpuContext *ctx, uint32_t csr_addr,
