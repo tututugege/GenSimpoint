@@ -1544,6 +1544,58 @@ void Ref_cpu::evaluate_interrupts(uint32_t mip_reg) {
       privilege < RISCV_MODE_M && s_irq_enable;
 }
 
+bool Ref_cpu::take_forced_interrupt(uint32_t cause, uint8_t target_privilege,
+                                    uint32_t pending_snapshot) {
+  constexpr uint32_t kInterruptBit = 1u << 31;
+  constexpr uint32_t kPendingMask = 0x00000bbbu;
+  if ((cause & kInterruptBit) == 0) {
+    return false;
+  }
+
+  state.csr[csr_mip] = (state.csr[csr_mip] & ~kPendingMask) |
+                       (pending_snapshot & kPendingMask);
+  state.csr[csr_sip] = state.csr[csr_mip] & 0x00000333u;
+  evaluate_interrupts(state.csr[csr_mip]);
+
+  struct Candidate {
+    bool active;
+    uint8_t privilege;
+    uint32_t code;
+  };
+  const Candidate candidates[] = {
+      {M_software_interrupt, RISCV_MODE_M, 3u},
+      {M_timer_interrupt, RISCV_MODE_M, 7u},
+      {M_external_interrupt, RISCV_MODE_M, 11u},
+      {S_external_interrupt, RISCV_MODE_S, 9u},
+      {S_timer_interrupt, RISCV_MODE_S, 5u},
+      {S_software_interrupt, RISCV_MODE_S, 1u},
+  };
+
+  const uint32_t requested_code = cause & ~kInterruptBit;
+  const Candidate *selected = nullptr;
+  for (const auto &candidate : candidates) {
+    if (candidate.active) {
+      selected = &candidate;
+      break;
+    }
+  }
+  if (selected == nullptr || selected->privilege != target_privilege ||
+      selected->code != requested_code) {
+    return false;
+  }
+
+  Instruction = 0;
+  state.store = false;
+  state.store_addr = state.store_data = state.store_strb = 0;
+  page_fault_inst = page_fault_load = page_fault_store = false;
+  illegal_exception = false;
+  is_io = false;
+  force_sync = false;
+  exception(0);
+  evaluate_interrupts(0);
+  return true;
+}
+
 void Ref_cpu::RISCV() {
   sync_timer_csrs(state, static_cast<uint32_t>(sim_time),
                   device_effects_enable && interrupt_delivery_enable);
@@ -1830,10 +1882,10 @@ void Ref_cpu::RV32CSR() {
 
     int csr_idx = cvt_number_to_csr(csr_addr);
     const bool use_external_csr_read =
-        external_csr_read_valid && external_csr_read_addr == csr_addr;
+        external_csr_read.valid && external_csr_read.address == csr_addr;
     uint32_t observed_csr_value = 0;
     if (use_external_csr_read) {
-      observed_csr_value = external_csr_read_value;
+      observed_csr_value = external_csr_read.value;
     } else if (csr_addr == number_mip) {
       observed_csr_value =
           ref_effective_mip(state.csr[csr_mip],
@@ -1933,7 +1985,7 @@ void Ref_cpu::RV32CSR() {
       }
     }
     if (use_external_csr_read) {
-      external_csr_read_valid = false;
+      external_csr_read = {};
     }
   }
 
@@ -2370,15 +2422,15 @@ void Ref_cpu::RV32IM() {
       return;
 
     } else {
-      if (external_mmio_read_valid) {
-        if (p_addr != external_mmio_read_addr) {
+      if (external_mmio_read.valid) {
+        if (p_addr != external_mmio_read.address) {
           std::cerr << "[RefCPU] injected MMIO read address mismatch: expected=0x"
-                    << std::hex << external_mmio_read_addr << " actual=0x"
+                    << std::hex << external_mmio_read.address << " actual=0x"
                     << p_addr << std::dec << std::endl;
           std::abort();
         }
-        state.gpr[reg_d_index] = external_mmio_read_result;
-        external_mmio_read_valid = false;
+        state.gpr[reg_d_index] = external_mmio_read.value;
+        external_mmio_read = {};
         break;
       }
       check_mem_range_or_log("load", p_addr, access_size);

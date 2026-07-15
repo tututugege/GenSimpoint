@@ -169,6 +169,12 @@ typedef struct CPU_state {
   uint32_t reserve_addr;
 } CPU_state;
 
+struct ReadOverride {
+  bool valid = false;
+  uint32_t address = 0;
+  uint32_t value = 0;
+};
+
 class Ref_cpu {
 public:
   ~Ref_cpu();
@@ -206,12 +212,8 @@ public:
   bool ref_only = false;
   bool device_effects_enable = true;
   bool interrupt_delivery_enable = true;
-  bool external_mmio_read_valid = false;
-  uint32_t external_mmio_read_addr = 0;
-  uint32_t external_mmio_read_result = 0;
-  bool external_csr_read_valid = false;
-  uint32_t external_csr_read_addr = 0;
-  uint32_t external_csr_read_value = 0;
+  ReadOverride external_mmio_read;
+  ReadOverride external_csr_read;
   std::vector<uint8_t> flash_image;
   std::vector<uint8_t> sdcard_image;
   std::unordered_map<uint32_t, uint32_t> ocsdc_regs;
@@ -222,6 +224,8 @@ public:
 
   void init(uint32_t reset_pc, const char *image, uint32_t size);
   void evaluate_interrupts(uint32_t mip_reg);
+  bool take_forced_interrupt(uint32_t cause, uint8_t target_privilege,
+                             uint32_t pending_snapshot);
   void load_flash_image(const std::string &path);
   void load_sdcard_image(const std::string &path);
   void ocsdc_reset();

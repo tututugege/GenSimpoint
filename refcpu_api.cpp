@@ -57,57 +57,6 @@ void import_state(Ref_cpu &cpu, const RefCpuState &state) {
   cpu.privilege = state.privilege;
 }
 
-bool prepare_forced_interrupt(Ref_cpu &cpu, uint32_t cause,
-                              uint8_t target_privilege,
-                              uint32_t pending_snapshot) {
-  constexpr uint32_t kInterruptBit = 1u << 31;
-  if ((cause & kInterruptBit) == 0) {
-    return false;
-  }
-
-  constexpr uint32_t kPendingMask = 0x00000bbbu;
-  cpu.state.csr[csr_mip] =
-      (cpu.state.csr[csr_mip] & ~kPendingMask) |
-      (pending_snapshot & kPendingMask);
-  cpu.state.csr[csr_sip] = cpu.state.csr[csr_mip] & 0x00000333u;
-
-  cpu.evaluate_interrupts(cpu.state.csr[csr_mip]);
-
-  uint8_t selected_privilege = 0xffu;
-  uint32_t selected_code = 0;
-  if (cpu.M_software_interrupt || cpu.M_timer_interrupt ||
-      cpu.M_external_interrupt) {
-    selected_privilege = RISCV_MODE_M;
-    selected_code = cpu.M_software_interrupt ? 3u
-                    : cpu.M_timer_interrupt  ? 7u
-                                             : 11u;
-  } else if (cpu.S_software_interrupt || cpu.S_timer_interrupt ||
-             cpu.S_external_interrupt) {
-    selected_privilege = RISCV_MODE_S;
-    selected_code = cpu.S_external_interrupt ? 9u
-                    : cpu.S_timer_interrupt   ? 5u
-                                              : 1u;
-  }
-
-  const uint32_t code = cause & ~kInterruptBit;
-  if (selected_privilege != target_privilege || selected_code != code) {
-    return false;
-  }
-
-  cpu.Instruction = 0;
-  cpu.state.store = false;
-  cpu.state.store_addr = 0;
-  cpu.state.store_data = 0;
-  cpu.state.store_strb = 0;
-  cpu.page_fault_inst = false;
-  cpu.page_fault_load = false;
-  cpu.page_fault_store = false;
-  cpu.illegal_exception = false;
-  cpu.is_io = false;
-  cpu.force_sync = false;
-  return true;
-}
-
 } // namespace
 
 struct RefCpuContext : RefCpuContextImpl {};
@@ -156,8 +105,8 @@ void refcpu_set_state(RefCpuContext *ctx, const RefCpuState *state) {
     return;
   }
   import_state(ctx->cpu, *state);
-  ctx->cpu.external_mmio_read_valid = false;
-  ctx->cpu.external_csr_read_valid = false;
+  ctx->cpu.external_mmio_read = {};
+  ctx->cpu.external_csr_read = {};
 }
 
 void refcpu_get_step_info(const RefCpuContext *ctx, RefCpuStepInfo *info) {
@@ -264,9 +213,7 @@ void refcpu_set_next_mmio_read(RefCpuContext *ctx, uint32_t paddr,
   if (ctx == nullptr) {
     return;
   }
-  ctx->cpu.external_mmio_read_valid = true;
-  ctx->cpu.external_mmio_read_addr = paddr;
-  ctx->cpu.external_mmio_read_result = result;
+  ctx->cpu.external_mmio_read = {true, paddr, result};
 }
 
 void refcpu_set_next_csr_read(RefCpuContext *ctx, uint32_t csr_addr,
@@ -274,27 +221,14 @@ void refcpu_set_next_csr_read(RefCpuContext *ctx, uint32_t csr_addr,
   if (ctx == nullptr) {
     return;
   }
-  ctx->cpu.external_csr_read_valid = true;
-  ctx->cpu.external_csr_read_addr = csr_addr;
-  ctx->cpu.external_csr_read_value = value;
+  ctx->cpu.external_csr_read = {true, csr_addr, value};
 }
 
 bool refcpu_take_forced_interrupt(RefCpuContext *ctx, uint32_t cause,
                                   uint8_t target_privilege,
                                   uint32_t pending_snapshot) {
-  if (ctx == nullptr ||
-      !prepare_forced_interrupt(ctx->cpu, cause, target_privilege,
-                                pending_snapshot)) {
-    return false;
-  }
-  ctx->cpu.exception(0);
-  ctx->cpu.M_software_interrupt = false;
-  ctx->cpu.M_timer_interrupt = false;
-  ctx->cpu.M_external_interrupt = false;
-  ctx->cpu.S_software_interrupt = false;
-  ctx->cpu.S_timer_interrupt = false;
-  ctx->cpu.S_external_interrupt = false;
-  return true;
+  return ctx != nullptr && ctx->cpu.take_forced_interrupt(
+                               cause, target_privilege, pending_snapshot);
 }
 
 void refcpu_set_sim_end(RefCpuContext *ctx, bool value) {
