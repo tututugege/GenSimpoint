@@ -146,8 +146,23 @@ void refcpu_sync_ram_from_dut(RefCpuContext *ctx, const uint32_t *ram_src,
   std::memcpy(ctx->cpu.memory, ram_src, bytes);
 }
 
+void refcpu_sync_sdram_from_dut(RefCpuContext *ctx,
+                                const uint32_t *sdram_src,
+                                size_t size_bytes) {
+  if (ctx == nullptr || sdram_src == nullptr ||
+      ctx->cpu.sdram_memory == nullptr) {
+    return;
+  }
+  const size_t bytes = std::min(size_bytes, static_cast<size_t>(SDRAM_SIZE));
+  std::memcpy(ctx->cpu.sdram_memory, sdram_src, bytes);
+}
+
 uint32_t *refcpu_get_ram_ptr(RefCpuContext *ctx) {
   return ctx == nullptr ? nullptr : ctx->cpu.memory;
+}
+
+uint32_t *refcpu_get_sdram_ptr(RefCpuContext *ctx) {
+  return ctx == nullptr ? nullptr : ctx->cpu.sdram_memory;
 }
 
 uint32_t refcpu_load_word(const RefCpuContext *ctx, uint32_t addr) {
@@ -172,11 +187,18 @@ void refcpu_set_io_word(RefCpuContext *ctx, uint32_t addr, uint32_t data) {
   if (ctx == nullptr) {
     return;
   }
-  ctx->cpu.store_word(addr, data);
+  ctx->cpu.checkpoint_mmio_write_backing(addr, data);
 }
 
 uint32_t refcpu_get_io_word(const RefCpuContext *ctx, uint32_t addr) {
-  return ctx == nullptr ? 0u : ctx->cpu.load_word(addr);
+  return ctx == nullptr ? 0u : ctx->cpu.checkpoint_mmio_read_word(addr);
+}
+
+void refcpu_sync_mmio_devices_from_backing(RefCpuContext *ctx) {
+  if (ctx == nullptr) {
+    return;
+  }
+  ctx->cpu.checkpoint_mmio_sync_devices();
 }
 
 void refcpu_set_uart_print(RefCpuContext *ctx, bool enable) {

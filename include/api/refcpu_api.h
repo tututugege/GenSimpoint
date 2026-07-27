@@ -51,13 +51,18 @@ void refcpu_get_step_info(const RefCpuContext *ctx, RefCpuStepInfo *info);
 void refcpu_step(RefCpuContext *ctx, uint64_t steps);
 void refcpu_sync_ram_from_dut(RefCpuContext *ctx, const uint32_t *ram_src,
                               size_t size_bytes);
+void refcpu_sync_sdram_from_dut(RefCpuContext *ctx,
+                                const uint32_t *sdram_src,
+                                size_t size_bytes);
 uint32_t *refcpu_get_ram_ptr(RefCpuContext *ctx);
+uint32_t *refcpu_get_sdram_ptr(RefCpuContext *ctx);
 uint32_t refcpu_load_word(const RefCpuContext *ctx, uint32_t addr);
 void refcpu_store_word(RefCpuContext *ctx, uint32_t addr, uint32_t data);
 
 void refcpu_clear_io_words(RefCpuContext *ctx);
 void refcpu_set_io_word(RefCpuContext *ctx, uint32_t addr, uint32_t data);
 uint32_t refcpu_get_io_word(const RefCpuContext *ctx, uint32_t addr);
+void refcpu_sync_mmio_devices_from_backing(RefCpuContext *ctx);
 
 void refcpu_set_uart_print(RefCpuContext *ctx, bool enable);
 void refcpu_set_ref_only(RefCpuContext *ctx, bool enable);

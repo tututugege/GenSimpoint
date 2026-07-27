@@ -83,23 +83,23 @@ make no_spike
 
 ## 🧭 地址空间布局（当前实现）
 
-当前实现采用“**1GB 连续 RAM + 离散 IO word 存储**”的方式，并对物理地址做严格白名单检查：
+当前实现采用“**256 MiB SDRAM + 2 GiB DDR + 离散 IO word 存储**”的方式，并对物理地址做严格白名单检查：
 
-### 1. RAM（连续分配）
-- 物理地址窗口：`0x80000000 - 0xBFFFFFFF`（1GB）
-- 仅该范围使用连续数组分配，用于镜像加载和正常内存访问
-- 超出 `0xBFFFFFFF` 会触发非法访存错误并退出
+### 1. RAM（两段独立分配）
+- SDRAM：`0x40000000 - 0x4fffffff`（256 MiB）
+- DDR：`0x80000000 - 0xffffffff`（2 GiB）
+- 两段之间的地址空洞不是 RAM，访问会触发非法访存错误
 
 ### 2. IO / Boot（离散存储）
 - `0x00000000` 附近：启动 stub（启动阶段写入）
 - `0x00001000` 附近：Boot ROM stub（启动阶段写入）
 - `0x10000000 - 0x100000ff`：UART（`tree.dts` 对应 `reg size = 0x100`）
 - `0x10000004`：OpenSBI 兼容寄存器（初始化写 `0x00006000`）
-- `0x0c000000 - 0x0c20ffff`：PLIC（`tree.dts` 对应 `reg size = 0x210000`）
-- `0x0c201004`：PLIC 中断相关寄存器（UART/PLIC 联动逻辑会访问）
+- `0x1fb00000 - 0x1fb00fff`：XPS INTC
 - `0x1fd0e000 - 0x1fd0e0ff`：Timer MMIO 窗口
 - `0x1fd0e000`：Timer 低位寄存器（读取返回 `sim_time`）
 - `0x1fd0e004`：Timer 高位寄存器（当前返回 0）
+- `0x1fe10000 - 0x1fe100ff`：OCSDC
 
 说明：
 - 低地址和外设地址不再占用连续大内存，而是按 `word_addr -> word_data` 离散存储。
@@ -114,43 +114,22 @@ make no_spike
 Checkpoint 使用 `zlib gzip`（写模式 `wb1`，文件后缀通常为 `.gz`），按如下顺序写入：
 
 1. `header`（固定 16 字节）
-2. `CPU_state`（POD 原样二进制）
-3. `interval_inst_count`（`uint64_t`）
-4. `RAM` 原始字节流（固定 `ram_size` 字节，当前为 1GB）
-5. `io_ranges + io_data`（重复 `io_range_count` 次）：
+2. v3 的 `sdram_size`（`uint32_t`，当前为 256 MiB）
+3. `CPU_state`（POD 原样二进制）
+4. `interval_inst_count`（`uint64_t`）
+5. `DDR` 原始字节流（固定 `ram_size` 字节，当前为 2 GiB）
+6. v3 checkpoint 的 `SDRAM` 原始字节流（256 MiB）
+7. `io_ranges + io_data`（重复 `io_range_count` 次）：
    - `io_range`：两个 `uint32_t`（`base`, `size`）
    - `io_data`：紧随其后的 `size` 字节原始数据
 
-### 当前配置下的精确布局（未压缩逻辑布局）
-- `header` 字段顺序为：
-  - `magic`：`"Rem\0"`（4 字节）
-  - `version`：当前为 `2`
-  - `ram_size`：字节数（当前为 1GB）
-  - `io_range_count`
-- `CPU_state` 当前大小：`236` 字节（`0xEC`）
-- `interval_inst_count` 大小：`8` 字节
-- `RAM` 大小：`0x40000000` 字节（1GB）
-- `io_range_count` 当前为 `4`，顺序固定为：`BOOT -> UART -> PLIC -> TIMER`
-
-| 区段 | 起始偏移 | 结束偏移 | 大小 |
-| :--- | :--- | :--- | :--- |
-| Header | `0x00000000` | `0x0000000F` | `0x10` |
-| CPU_state | `0x00000010` | `0x000000FB` | `0xEC` |
-| interval_inst_count | `0x000000FC` | `0x00000103` | `0x08` |
-| RAM | `0x00000104` | `0x40000103` | `0x40000000` |
-| BOOT range descriptor (`base,size`) | `0x40000104` | `0x4000010B` | `0x08` |
-| BOOT data (`base=0x00000000,size=0x2000`) | `0x4000010C` | `0x4000210B` | `0x2000` |
-| UART range descriptor (`base,size`) | `0x4000210C` | `0x40002113` | `0x08` |
-| UART data (`base=0x10000000,size=0x100`) | `0x40002114` | `0x40002213` | `0x100` |
-| PLIC range descriptor (`base,size`) | `0x40002214` | `0x4000221B` | `0x08` |
-| PLIC data (`base=0x0c000000,size=0x210000`) | `0x4000221C` | `0x4021221B` | `0x210000` |
-| TIMER range descriptor (`base,size`) | `0x4021221C` | `0x40212223` | `0x08` |
-| TIMER data (`base=0x1fd0e000,size=0x100`) | `0x40212224` | `0x40212323` | `0x100` |
-
-总逻辑大小（未压缩）为 `0x40212324` 字节（`1,075,913,508` 字节）。实际文件大小会因 gzip 压缩而变小。
+### 当前 checkpoint 版本
+- v3 同时保存 DDR 与 SDRAM
+- v2 checkpoint 仍可恢复，恢复时新增 SDRAM 清零
+- IO 顺序固定为：`BOOT -> UART -> XPS INTC -> TIMER -> OCSDC`
 
 ### 兼容性
-- 当前恢复逻辑只支持新格式（含 `header`、`io_ranges`、`io_data`），不兼容旧格式。
+- 当前恢复逻辑兼容 v2 和 v3；v2 文件没有 SDRAM payload。
 
 ---
 
@@ -162,18 +141,18 @@ Checkpoint 使用 `zlib gzip`（写模式 `wb1`，文件后缀通常为 `.gz`）
 ```
 
 恢复流程：
-1. 先通过 `init()` 分配 1GB RAM，并完成默认 Boot/IO 初始化
-2. 读取并校验 `header`（magic/version/ram_size）
+1. 先通过 `init()` 分配 2 GiB DDR 和 256 MiB SDRAM
+2. 读取并校验 `header`（magic/version/ram_size/io_range_count）
 3. `restore_checkpoint()` 覆盖 `CPU_state` 和 `interval_inst_count`
-4. 覆盖整个 1GB RAM 内容
+4. 覆盖 DDR；v3 继续覆盖 SDRAM，v2 将 SDRAM 清零
 5. 读取并校验 IO 布局（base+size）是否与当前模拟器配置一致
 6. 读取每个 range 的 `io_data` 并恢复 IO 内容
 
 ### 2. 离线解析 checkpoint（二次开发）
 若需要自己读取文件，按“Checkpoint 格式”中的顺序使用 `gzread` 逐段解析即可。关键点：
-- 必须先校验 `magic="Rem\0"` 与 `version=2`
+- 必须先校验 `magic="Rem\0"`，当前支持 v2 和 v3
 - 必须使用与当前程序一致的 `CPU_state` 结构体布局（同编译器/ABI 假设）
-- RAM 字节数必须与运行配置一致（当前固定 1GB）
+- DDR 字节数必须与运行配置一致（当前固定 2 GiB）
 - 最后按 `io_ranges` 顺序读取并校验，再读取对应 `io_data`
 
 ---
@@ -191,7 +170,6 @@ Checkpoint 使用 `zlib gzip`（写模式 `wb1`，文件后缀通常为 `.gz`）
 - **`step(n)`**: 驱动 Spike 内部核心向前执行 `n` 条指令。
 - **`reg_check(state, priv)`**: 比对 DUT 传入的状态（PC, GPR, CSR）与 Spike 内部状态。
 - **`sync_state(state, priv)`**: 强制将 DUT 的所有架构上下文同步给 Spike（用于启动和中断对齐）。
-- **`sync_reg_from_dut(idx, val)`**: 手术级同步。仅同步特定的通用寄存器（通常用于 I/O 读取后）。
 
 ### 3. `refcpu_api`（供主模拟器链接的静态库接口）
 - 头文件：`include/api/refcpu_api.h`
@@ -207,6 +185,6 @@ make -C GenSimpoint librefcpu.a
 
 ## 📂 项目结构
 - `include/`: 所有的头文件，定义了指令集掩码、CSR 地址及类接口。
-- `exec.cpp`: 包含主要的指令执行逻辑以及硬件外设（如 UART/PLIC）的简易模拟。
+- `exec.cpp`: 包含主要的指令执行逻辑以及硬件外设（如 UART/XPS INTC/OCSDC）的简易模拟。
 - `simpoint.cpp`: 负责 BBV 生成及 Checkpoint 的保存与恢复。
 - `spike_ref.h`: 处理与 Spike (`libriscv`) 的集成及状态对比。

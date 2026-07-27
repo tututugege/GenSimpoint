@@ -29,13 +29,20 @@ public:
 
 class SpikeRef {
 public:
+  static constexpr uint32_t kAsyncPendingMask =
+      MIP_MTIP | MIP_MEIP | MIP_SEIP;
+
+  static reg_t canonical_rv32(uint32_t value) {
+    return static_cast<reg_t>(static_cast<int64_t>(static_cast<int32_t>(value)));
+  }
+
   std::unique_ptr<sim_t> sim;
   std::unique_ptr<cfg_t> cfg;
   // We don't store mems vector here to avoid confusion with sim_t's internal
   // copy But we need to keep track of the pointers if we want to access them
   // directly
   abstract_mem_t *main_mem_ptr;
-  abstract_mem_t *plic_mem_ptr;
+  abstract_mem_t *sdram_mem_ptr;
   abstract_mem_t *xps_intc_mem_ptr;
   abstract_mem_t *uart_mem_ptr;
   abstract_mem_t *timer_mem_ptr;
@@ -58,12 +65,13 @@ public:
     cfg->bootargs = nullptr;
     cfg->priv = "MSU";
     cfg->endianness = endianness_little;
+    cfg->mem_layout.push_back(mem_cfg_t(SDRAM_BASE, SDRAM_SIZE));
     cfg->mem_layout.push_back(mem_cfg_t(ram_base, ram_size));
     cfg->hartids.push_back(0);
     cfg->start_pc = 0x80000000;
 
     main_mem_ptr = new SpikeMem(ram_size);
-    plic_mem_ptr = new mem_t(align_up_4k(PLIC_MMIO_SIZE)); // PLIC area from DTB
+    sdram_mem_ptr = new SpikeMem(SDRAM_SIZE);
     xps_intc_mem_ptr =
         new mem_t(align_up_4k(XPS_INTC_MMIO_SIZE)); // XPS INTC area from DTB
     uart_mem_ptr = new mem_t(align_up_4k(UART_MMIO_SIZE)); // UART area from DTB
@@ -90,8 +98,8 @@ public:
                         (const uint8_t *)&opensbi_val);
 
     std::vector<std::pair<reg_t, abstract_mem_t *>> mems;
+    mems.push_back(std::make_pair(SDRAM_BASE, sdram_mem_ptr));
     mems.push_back(std::make_pair(ram_base, main_mem_ptr));
-    mems.push_back(std::make_pair(PLIC_BASE, plic_mem_ptr));
     mems.push_back(std::make_pair(XPS_INTC_BASE, xps_intc_mem_ptr));
     mems.push_back(std::make_pair(UART_BASE, uart_mem_ptr));
     mems.push_back(std::make_pair(TIMER_BASE, timer_mem_ptr));
@@ -155,6 +163,58 @@ public:
     }
   }
 
+  void suppress_async_interrupts() {
+    processor_t *p = sim->get_core(0);
+    p->get_state()->mip->backdoor_write_with_mask(kAsyncPendingMask, 0);
+  }
+
+  void sync_all_memory_from_dut(const uint32_t *dut_ram, size_t ram_size,
+                                const uint32_t *dut_sdram,
+                                size_t sdram_size) {
+    if (dut_ram == nullptr || dut_sdram == nullptr) {
+      throw std::runtime_error("Spike memory sync received a null DUT buffer");
+    }
+    if (ram_size > main_mem_ptr->size() ||
+        sdram_size > sdram_mem_ptr->size()) {
+      throw std::runtime_error("Spike memory sync range exceeds backing memory");
+    }
+    if (!main_mem_ptr->store(0, ram_size,
+                             reinterpret_cast<const uint8_t *>(dut_ram)) ||
+        !sdram_mem_ptr->store(0, sdram_size,
+                              reinterpret_cast<const uint8_t *>(dut_sdram))) {
+      throw std::runtime_error("Spike full memory sync failed");
+    }
+  }
+
+  void sync_memory_range_from_dut(uint32_t paddr, size_t size,
+                                  const uint32_t *dut_ram,
+                                  const uint32_t *dut_sdram) {
+    if (size == 0) {
+      return;
+    }
+    abstract_mem_t *target = nullptr;
+    const uint8_t *source = nullptr;
+    uint32_t base = 0;
+    if (paddr >= SDRAM_BASE &&
+        static_cast<uint64_t>(paddr) + size <=
+            static_cast<uint64_t>(SDRAM_BASE) + SDRAM_SIZE) {
+      target = sdram_mem_ptr;
+      source = reinterpret_cast<const uint8_t *>(dut_sdram);
+      base = SDRAM_BASE;
+    } else if (paddr >= DDR_BASE &&
+               static_cast<uint64_t>(paddr) + size <= 0x100000000ull) {
+      target = main_mem_ptr;
+      source = reinterpret_cast<const uint8_t *>(dut_ram);
+      base = DDR_BASE;
+    } else {
+      throw std::runtime_error("Spike DMA sync range is outside DUT RAM");
+    }
+    const size_t offset = static_cast<size_t>(paddr - base);
+    if (source == nullptr || !target->store(offset, size, source + offset)) {
+      throw std::runtime_error("Spike DMA memory sync failed");
+    }
+  }
+
   bool reg_check(const CPU_state &dut_state, uint8_t dut_priv) {
     processor_t *p = sim->get_core(0);
     state_t *s = p->get_state();
@@ -178,10 +238,19 @@ public:
     bool csr_mismatch = false;
     bool csr_mismatches[21] = {false};
     uint32_t ref_csr_vals[21];
+    uint32_t dut_csr_vals[21];
 
     for (int i = 0; i < 21; ++i) {
       ref_csr_vals[i] = (uint32_t)p->get_csr(implemented_csr_addrs[i]);
-      if (ref_csr_vals[i] != dut_state.csr[i]) {
+      dut_csr_vals[i] = dut_state.csr[i];
+    }
+    ref_csr_vals[4] &= ~kAsyncPendingMask;
+    dut_csr_vals[4] &= ~kAsyncPendingMask;
+    ref_csr_vals[17] = ref_csr_vals[4] & 0x00000333u;
+    dut_csr_vals[17] = dut_csr_vals[4] & 0x00000333u;
+
+    for (int i = 0; i < 21; ++i) {
+      if (ref_csr_vals[i] != dut_csr_vals[i]) {
         // Special case for mstatus/sstatus where Spike might have different
         // SD/UXL bits For now, let's report all mismatches to be strict.
         csr_mismatch = true;
@@ -420,7 +489,7 @@ public:
           std::cout << std::left << std::setw(10) << csr_names[i] << "0x"
                     << std::setw(18) << std::hex << implemented_csr_addrs[i]
                     << "0x" << std::setw(18) << std::hex << ref_csr_vals[i]
-                    << "0x" << std::setw(18) << std::hex << dut_state.csr[i]
+                    << "0x" << std::setw(18) << std::hex << dut_csr_vals[i]
                     << " <-- MISMATCH\033[0m" << std::dec << std::endl;
         }
       }
@@ -476,15 +545,10 @@ public:
     // Set privilege mode (passing false for 'virt' mode)
     p->set_privilege(privilege, false);
 
-    s->pc = dut_state.pc;
+    s->pc = canonical_rv32(dut_state.pc);
     for (int i = 0; i < 32; ++i) {
-      s->XPR.write(i, (reg_t)dut_state.gpr[i]);
+      s->XPR.write(i, canonical_rv32(dut_state.gpr[i]));
     }
   }
 
-  void sync_reg_from_dut(int reg_idx, uint32_t val) {
-    processor_t *p = sim->get_core(0);
-    state_t *s = p->get_state();
-    s->XPR.write(reg_idx, (reg_t)val);
-  }
 };

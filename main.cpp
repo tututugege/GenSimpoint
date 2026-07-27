@@ -36,6 +36,12 @@ int main(int argc, char *argv[]) {
           config.mode = SimMode::GEN_CHECKPOINT;
         else if (m == "restore")
           config.mode = SimMode::RESTORE;
+        else if (m == "special-ckpt")
+          config.mode = SimMode::GEN_SPECIAL_CHECKPOINT;
+        else {
+          std::cerr << "Unknown mode: " << m << std::endl;
+          return 1;
+        }
       }
 
       // 路径参数

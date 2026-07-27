@@ -31,12 +31,15 @@
 standalone `--diff` 运行在 `Ref_cpu::exec()` 的主循环里，遵循：
 
 1. `GenSimpoint` 先执行一条指令
-2. Spike 执行一条对应指令
-3. 比较 PC、GPR、CSR 和关键异常信息
-4. 发现不一致时立即停止并报错
+2. 普通 RAM 指令由 Spike 执行一条，并比较 PC、GPR、CSR
+3. MMIO/外设访问、`wfi` 等待和 DUT 中断切换不让 Spike 自行执行，直接同步 DUT post-state
+4. OCSDC DMA 写入 SDRAM/DDR 后，把对应物理地址范围同步到 Spike
+5. 发现不一致时立即停止并报错
+
+Spike 普通 step 前会清除自身的异步 `MTIP/MEIP/SEIP` pending，CSR 比较时也屏蔽这些由平台时序决定的位；中断是否发生以及 trap 后状态完全以 DUT 为准。
 
 ### 2.2 延迟启动
-为绕过早期 boot stub 差异，Spike Difftest 不会从 `pc=0x0` 立即开始，而是在 DUT PC 到达 `0x80000000` 后才启动同步。
+为绕过早期 boot stub 差异，Spike Difftest 不会从 `pc=0x0` 立即开始，而是在 DUT PC 到达 `0x80000000` 后先同步完整 SDRAM、DDR 和架构状态，再开始逐条比对。
 
 ### 2.3 构建与运行
 ```bash
@@ -87,18 +90,21 @@ make -C GenSimpoint librefcpu.a
 
 无论是 standalone 还是静态库，底层都使用同一个 `Ref_cpu`，因此以下行为一致：
 
-- RAM 窗口固定为 `0x80000000 .. 0xbfffffff`（1GB）
-- Boot/UART/PLIC/Timer 使用离散 `io_words` 存储
+- SDRAM 窗口为 `0x40000000 .. 0x4fffffff`（256 MiB）
+- DDR 窗口为 `0x80000000 .. 0xffffffff`（2 GiB）
+- Boot/UART/XPS INTC/Timer/OCSDC 使用离散 `io_words` 存储
 - 物理地址访问采用严格白名单检查
 - 遇到 `ebreak` 会退出
-- 遇到可退休的 `wfi` 会退出
+- `wfi` 按可退休 NOP 处理
 
 其中物理地址白名单当前为：
-- Boot IO: `0x00000000 .. 0x00001fff`
+- Boot IO: `0x00000000 .. 0x000fffff`
 - UART: `0x10000000 .. 0x100000ff`
-- PLIC: `0x0c000000 .. 0x0c20ffff`
+- XPS INTC: `0x1fb00000 .. 0x1fb00fff`
 - Timer: `0x1fd0e000 .. 0x1fd0e0ff`
-- RAM: `0x80000000 .. 0xbfffffff`
+- OCSDC: `0x1fe10000 .. 0x1fe100ff`
+- SDRAM: `0x40000000 .. 0x4fffffff`
+- DDR: `0x80000000 .. 0xffffffff`
 
 任何不在白名单内的访存都会直接报错，例如：
 ```text

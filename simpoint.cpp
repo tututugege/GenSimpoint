@@ -1,4 +1,5 @@
 #include "ref.h"
+#include <cstring>
 #include <cstdint>
 #include <iostream>
 #include <map>
@@ -9,16 +10,19 @@
 
 namespace {
 constexpr uint32_t CKPT_MAGIC = 0x006d6552u; // "Rem\0" (little-endian)
-constexpr uint32_t CKPT_VERSION = 2u;
+constexpr uint16_t CKPT_VERSION = 3u;
+constexpr uint16_t CKPT_VERSION_LEGACY = 2u;
 constexpr uint32_t BOOT_IO_BASE = 0x00000000u;
-constexpr uint32_t BOOT_IO_SIZE = 0x00002000u;
+constexpr uint32_t BOOT_IO_SIZE = 0x00100000u;
 
 struct CkptHeader {
   uint32_t magic;
-  uint32_t version;
+  uint16_t format_ver;
+  uint16_t privilege_mode;
   uint32_t ram_size;
   uint32_t io_range_count;
 };
+static_assert(sizeof(CkptHeader) == 16);
 
 struct CkptIoRange {
   uint32_t base;
@@ -50,22 +54,32 @@ template <typename T> void gz_read_pod(gzFile file, T &data) {
 }
 
 void gz_write_bytes(gzFile file, const void *buf, size_t len) {
-  if (len == 0) {
-    return;
-  }
-  if (gzwrite(file, buf, static_cast<unsigned int>(len)) != static_cast<int>(len)) {
-    std::cerr << "Error writing checkpoint payload." << std::endl;
-    exit(1);
+  constexpr size_t kGzChunkSize = 1ULL << 30;
+  const auto *bytes = static_cast<const uint8_t *>(buf);
+  while (len != 0) {
+    const size_t chunk = len < kGzChunkSize ? len : kGzChunkSize;
+    if (gzwrite(file, bytes, static_cast<unsigned int>(chunk)) !=
+        static_cast<int>(chunk)) {
+      std::cerr << "Error writing checkpoint payload." << std::endl;
+      exit(1);
+    }
+    bytes += chunk;
+    len -= chunk;
   }
 }
 
 void gz_read_bytes(gzFile file, void *buf, size_t len) {
-  if (len == 0) {
-    return;
-  }
-  if (gzread(file, buf, static_cast<unsigned int>(len)) != static_cast<int>(len)) {
-    std::cerr << "Error reading checkpoint payload." << std::endl;
-    exit(1);
+  constexpr size_t kGzChunkSize = 1ULL << 30;
+  auto *bytes = static_cast<uint8_t *>(buf);
+  while (len != 0) {
+    const size_t chunk = len < kGzChunkSize ? len : kGzChunkSize;
+    if (gzread(file, bytes, static_cast<unsigned int>(chunk)) !=
+        static_cast<int>(chunk)) {
+      std::cerr << "Error reading checkpoint payload." << std::endl;
+      exit(1);
+    }
+    bytes += chunk;
+    len -= chunk;
   }
 }
 } // namespace
@@ -136,10 +150,12 @@ void Ref_cpu::save_checkpoint(const std::string &filename) {
   CkptHeader header = {
       CKPT_MAGIC,
       CKPT_VERSION,
+      static_cast<uint16_t>(privilege),
       ram_size,
       static_cast<uint32_t>(io_layout.size()),
   };
   gz_write_pod(file, header);
+  gz_write_pod(file, static_cast<uint32_t>(SDRAM_SIZE));
 
   // 1. 保存 CPU 状态
   gz_write_pod(file, state);
@@ -153,23 +169,24 @@ void Ref_cpu::save_checkpoint(const std::string &filename) {
   std::cout << "Saving Memory: " << (ram_size / sizeof(uint32_t)) << " words ("
             << (ram_size / 1024 / 1024) << " MB)..." << std::endl;
   gz_write_bytes(file, reinterpret_cast<const uint8_t *>(memory), ram_size);
+  if (sdram_memory == nullptr) {
+    std::cerr << "Error: Invalid SDRAM buffer when saving checkpoint."
+              << std::endl;
+    exit(1);
+  }
+  gz_write_bytes(file, reinterpret_cast<const uint8_t *>(sdram_memory),
+                 SDRAM_SIZE);
 
   // 3. 保存 IO 布局（base + size）
   for (const auto &r : io_layout) {
     gz_write_pod(file, r);
     std::vector<uint8_t> io_bytes(r.size, 0);
-    for (const auto &kv : io_words) {
-      if (kv.first < r.base) {
-        continue;
-      }
-      const uint64_t off = static_cast<uint64_t>(kv.first) - r.base;
-      if (off + sizeof(uint32_t) > r.size) {
-        continue;
-      }
-      io_bytes[off + 0] = static_cast<uint8_t>(kv.second & 0xFF);
-      io_bytes[off + 1] = static_cast<uint8_t>((kv.second >> 8) & 0xFF);
-      io_bytes[off + 2] = static_cast<uint8_t>((kv.second >> 16) & 0xFF);
-      io_bytes[off + 3] = static_cast<uint8_t>((kv.second >> 24) & 0xFF);
+    for (uint32_t off = 0; off + 4u <= r.size; off += 4u) {
+      const uint32_t word = checkpoint_mmio_read_word(r.base + off);
+      io_bytes[off + 0] = static_cast<uint8_t>(word & 0xFF);
+      io_bytes[off + 1] = static_cast<uint8_t>((word >> 8) & 0xFF);
+      io_bytes[off + 2] = static_cast<uint8_t>((word >> 16) & 0xFF);
+      io_bytes[off + 3] = static_cast<uint8_t>((word >> 24) & 0xFF);
     }
     gz_write_bytes(file, io_bytes.data(), io_bytes.size());
   }
@@ -197,10 +214,24 @@ void Ref_cpu::restore_checkpoint(const std::string &filename) {
     std::cerr << "Error: Invalid checkpoint magic." << std::endl;
     exit(1);
   }
-  if (header.version != CKPT_VERSION) {
-    std::cerr << "Error: Unsupported checkpoint version: " << header.version
+  const uint16_t checkpoint_version = header.format_ver;
+  privilege = static_cast<uint8_t>(header.privilege_mode & 0x3u);
+  if (checkpoint_version != CKPT_VERSION &&
+      checkpoint_version != CKPT_VERSION_LEGACY) {
+    std::cerr << "Error: Unsupported checkpoint version: "
+              << checkpoint_version
               << std::endl;
     exit(1);
+  }
+  uint32_t checkpoint_sdram_size = 0;
+  if (checkpoint_version >= CKPT_VERSION) {
+    gz_read_pod(file, checkpoint_sdram_size);
+    if (checkpoint_sdram_size != SDRAM_SIZE) {
+      std::cerr << "Error: Checkpoint SDRAM size mismatch. file=0x"
+                << std::hex << checkpoint_sdram_size << " sim=0x"
+                << SDRAM_SIZE << std::dec << std::endl;
+      exit(1);
+    }
   }
   if (header.ram_size != ram_size) {
     std::cerr << "Error: Checkpoint RAM size mismatch. file=0x" << std::hex
@@ -220,6 +251,16 @@ void Ref_cpu::restore_checkpoint(const std::string &filename) {
   }
   std::cout << "Restoring Memory..." << std::endl;
   gz_read_bytes(file, reinterpret_cast<uint8_t *>(memory), ram_size);
+  if (sdram_memory == nullptr) {
+    std::cerr << "Error: SDRAM not allocated." << std::endl;
+    exit(1);
+  }
+  if (checkpoint_sdram_size != 0) {
+    gz_read_bytes(file, reinterpret_cast<uint8_t *>(sdram_memory),
+                  checkpoint_sdram_size);
+  } else {
+    std::memset(sdram_memory, 0, SDRAM_SIZE);
+  }
 
   // 3. 恢复并校验 IO 布局（base + size）
   const auto io_layout = expected_io_layout();
@@ -247,11 +288,10 @@ void Ref_cpu::restore_checkpoint(const std::string &filename) {
                       (static_cast<uint32_t>(io_bytes[off + 1]) << 8) |
                       (static_cast<uint32_t>(io_bytes[off + 2]) << 16) |
                       (static_cast<uint32_t>(io_bytes[off + 3]) << 24);
-      if (word != 0) {
-        io_words[r.base + off] = word;
-      }
+      checkpoint_mmio_write_backing(r.base + off, word);
     }
   }
+  checkpoint_mmio_sync_devices();
 
   gzclose(file);
   std::cout << "Checkpoint restored from " << final_name << std::endl;
@@ -288,6 +328,46 @@ std::map<uint32_t, uint32_t> load_simpoints(const std::string &filename) {
       std::cout << "Target: Interval " << interval_id << " -> SP " << sp_id
                 << std::endl;
     }
+  }
+  return targets;
+}
+
+std::map<uint64_t, std::string>
+load_special_checkpoint_targets(const std::string &filename) {
+  std::map<uint64_t, std::string> targets;
+  std::ifstream in(filename);
+  if (!in) {
+    std::cerr << "Error: Could not open special checkpoint points file: "
+              << filename << std::endl;
+    exit(1);
+  }
+
+  std::string line;
+  uint64_t line_number = 0;
+  while (std::getline(in, line)) {
+    ++line_number;
+    if (line.empty() || line[0] == '#')
+      continue;
+
+    std::stringstream ss(line);
+    uint64_t absolute_inst = 0;
+    std::string label;
+    if (!(ss >> absolute_inst >> label)) {
+      std::cerr << "Error: malformed special checkpoint target at line "
+                << line_number << ": " << line << std::endl;
+      exit(1);
+    }
+    std::string extra;
+    if (ss >> extra) {
+      std::cerr << "Error: extra field in special checkpoint target at line "
+                << line_number << ": " << line << std::endl;
+      exit(1);
+    }
+    auto [it, inserted] = targets.emplace(absolute_inst, label);
+    if (!inserted)
+      it->second += "_" + label;
+    std::cout << "Special target: absolute instruction " << absolute_inst
+              << " -> " << label << std::endl;
   }
   return targets;
 }

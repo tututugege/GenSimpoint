@@ -18,7 +18,10 @@ extern "C" {
 }
 
 namespace {
-constexpr uint32_t kRamBase = 0x80000000u;
+constexpr uint32_t kSdramBase = SDRAM_BASE;
+constexpr uint64_t kSdramUpperBound =
+    static_cast<uint64_t>(SDRAM_BASE) + SDRAM_SIZE;
+constexpr uint32_t kRamBase = DDR_BASE;
 constexpr uint64_t kRamUpperBound = 0x100000000ull;
 constexpr uint32_t kRamSizeBytes = kRamUpperBound - kRamBase;
 constexpr uint32_t kBootIoBase = 0x00000000u;
@@ -27,7 +30,6 @@ constexpr uint32_t kSdSectorSize = 512u;
 constexpr bool kLogVerboseTimer = false;
 constexpr bool kLogVerboseReturns = false;
 constexpr bool kLogVerboseCsrMip = false;
-constexpr bool kLogVerboseWfi = false;
 constexpr bool kLogVerboseXpsIntc = false;
 constexpr bool kLogVerboseOcsdcIrqEnable = false;
 constexpr bool kLogVerboseOcsdcData = false;
@@ -257,13 +259,26 @@ std::vector<uint8_t> load_binary_file(const std::string &path,
   return data;
 }
 
-inline bool is_ram_range(uint32_t addr, uint32_t size) {
-  if (size == 0 || addr < kRamBase) {
+inline bool range_within(uint32_t addr, uint32_t size, uint64_t base,
+                         uint64_t upper_bound) {
+  if (size == 0 || static_cast<uint64_t>(addr) < base) {
     return false;
   }
   const uint64_t end =
       static_cast<uint64_t>(addr) + static_cast<uint64_t>(size) - 1;
-  return end < kRamUpperBound;
+  return end < upper_bound;
+}
+
+inline bool is_sdram_range(uint32_t addr, uint32_t size) {
+  return range_within(addr, size, kSdramBase, kSdramUpperBound);
+}
+
+inline bool is_ddr_range(uint32_t addr, uint32_t size) {
+  return range_within(addr, size, kRamBase, kRamUpperBound);
+}
+
+inline bool is_ram_range(uint32_t addr, uint32_t size) {
+  return is_sdram_range(addr, size) || is_ddr_range(addr, size);
 }
 
 inline bool is_mmio_range(uint32_t addr, uint32_t size) {
@@ -306,28 +321,28 @@ static inline float32_t to_f32(uint32_t v) {
   return f;
 }
 
-static inline uint32_t ref_effective_mip(uint32_t mip_reg, uint32_t now,
+static inline uint32_t ref_effective_mip(uint32_t mip_reg, uint64_t now,
                                          bool synthesize_timer_interrupt) {
   if (synthesize_timer_interrupt &&
-      (static_cast<uint64_t>(now) + g_ref_timer_offset) >= g_ref_timer_cmp) {
+      (now + g_ref_timer_offset) >= g_ref_timer_cmp) {
     return mip_reg | MIP_MTIP;
   }
   return mip_reg;
 }
 
-static inline void sync_timer_csrs(CPU_state &state, uint32_t now,
+static inline void sync_timer_csrs(CPU_state &state, uint64_t now,
                                    bool synthesize_timer_interrupt) {
   state.csr[csr_sip] =
       ref_effective_mip(state.csr[csr_mip], now, synthesize_timer_interrupt) &
       0x00000333u;
 }
 
-static inline uint64_t ref_timer_now(uint32_t now) {
-  return static_cast<uint64_t>(now) + g_ref_timer_offset;
+static inline uint64_t ref_timer_now(uint64_t now) {
+  return now + g_ref_timer_offset;
 }
 
-static inline void ref_write_timer_value(uint64_t value, uint32_t now) {
-  g_ref_timer_offset = value - static_cast<uint64_t>(now);
+static inline void ref_write_timer_value(uint64_t value, uint64_t now) {
+  g_ref_timer_offset = value - now;
 }
 
 static inline uint32_t from_f32(float32_t f) { return f.v; }
@@ -424,7 +439,7 @@ static inline uint32_t f32_classify_riscv(float32_t f) {
 } // namespace
 
 uint32_t Ref_cpu::visible_mip() const {
-  return ref_effective_mip(state.csr[csr_mip], static_cast<uint32_t>(sim_time),
+  return ref_effective_mip(state.csr[csr_mip], sim_time,
                            device_effects_enable && interrupt_delivery_enable);
 }
 
@@ -433,10 +448,28 @@ uint32_t Ref_cpu::visible_sip() const {
 }
 
 std::map<uint32_t, uint32_t> load_simpoints(const std::string &filename);
+std::map<uint64_t, std::string>
+load_special_checkpoint_targets(const std::string &filename);
+
+namespace {
+std::string checkpoint_label(std::string label) {
+  for (char &ch : label) {
+    const bool safe = (ch >= 'a' && ch <= 'z') ||
+                      (ch >= 'A' && ch <= 'Z') ||
+                      (ch >= '0' && ch <= '9') || ch == '-' || ch == '_';
+    if (!safe)
+      ch = '_';
+  }
+  return label.empty() ? "event" : label;
+}
+} // namespace
 
 Ref_cpu::~Ref_cpu() {
   if (memory) {
     free(memory);
+  }
+  if (sdram_memory) {
+    free(sdram_memory);
   }
 }
 
@@ -456,6 +489,14 @@ void Ref_cpu::init(uint32_t reset_pc, const char *image, uint32_t size) {
   if (!memory) {
     std::cerr << "Error: Could not allocate " << ram_size
               << " bytes of memory" << std::endl;
+    exit(1);
+  }
+  const uint32_t sdram_words = SDRAM_SIZE / sizeof(uint32_t);
+  sdram_memory =
+      (uint32_t *)calloc(sdram_words, sizeof(uint32_t));
+  if (!sdram_memory) {
+    std::cerr << "Error: Could not allocate " << SDRAM_SIZE
+              << " bytes of SDRAM" << std::endl;
     exit(1);
   }
   io_words.clear();
@@ -480,7 +521,7 @@ void Ref_cpu::init(uint32_t reset_pc, const char *image, uint32_t size) {
     inst_data.seekg(0, std::ios::beg);
 
     if (img_size < 0 || static_cast<uint64_t>(img_size) > kRamSizeBytes) {
-      std::cerr << "[RefCPU] Image too large for 1GB RAM window: " << img_size
+      std::cerr << "[RefCPU] Image too large for DDR window: " << img_size
                 << " bytes" << std::endl;
       exit(1);
     }
@@ -795,6 +836,11 @@ void Ref_cpu::ocsdc_execute_command(uint32_t command, uint32_t argument) {
       old_word |= static_cast<uint32_t>(src[i]) << shift;
       store_word(word_addr, old_word);
     }
+#ifdef ENABLE_SPIKE
+    if (difftest_started && spike_ref) {
+      spike_ref->sync_memory_range_from_dut(dst, len, memory, sdram_memory);
+    }
+#endif
   };
 
   switch (opcode) {
@@ -982,6 +1028,71 @@ void Ref_cpu::ocsdc_write_reg(uint32_t word_addr, uint32_t data) {
   }
 }
 
+uint32_t Ref_cpu::checkpoint_mmio_read_word(uint32_t word_addr) const {
+  word_addr &= ~0x3u;
+  if (word_addr >= TIMER_BASE &&
+      word_addr < (TIMER_BASE + TIMER_MMIO_SIZE)) {
+    switch (word_addr - TIMER_BASE) {
+    case 0x00:
+      return static_cast<uint32_t>(ref_timer_now(sim_time));
+    case 0x04:
+      return static_cast<uint32_t>(ref_timer_now(sim_time) >> 32);
+    case 0x08:
+      return static_cast<uint32_t>(g_ref_timer_cmp);
+    case 0x0c:
+      return static_cast<uint32_t>(g_ref_timer_cmp >> 32);
+    default:
+      return 0;
+    }
+  }
+  if (word_addr >= XPS_INTC_BASE &&
+      word_addr < (XPS_INTC_BASE + XPS_INTC_MMIO_SIZE)) {
+    return xps_intc_read_reg(word_addr);
+  }
+  if (word_addr >= OCSDC_BASE &&
+      word_addr < (OCSDC_BASE + OCSDC_MMIO_SIZE)) {
+    return ocsdc_read_reg(word_addr);
+  }
+  auto it = io_words.find(word_addr);
+  return it == io_words.end() ? 0u : it->second;
+}
+
+void Ref_cpu::checkpoint_mmio_write_backing(uint32_t word_addr,
+                                             uint32_t data) {
+  word_addr &= ~0x3u;
+  if (data == 0) {
+    io_words.erase(word_addr);
+  } else {
+    io_words[word_addr] = data;
+  }
+}
+
+void Ref_cpu::checkpoint_mmio_sync_devices() {
+  const auto backing_word = [&](uint32_t addr) {
+    auto it = io_words.find(addr & ~0x3u);
+    return it == io_words.end() ? 0u : it->second;
+  };
+
+  const uint64_t timer_value =
+      static_cast<uint64_t>(backing_word(TIMER_BASE)) |
+      (static_cast<uint64_t>(backing_word(TIMER_BASE + 4u)) << 32);
+  g_ref_timer_offset = timer_value - sim_time;
+  g_ref_timer_cmp =
+      static_cast<uint64_t>(backing_word(TIMER_BASE + 8u)) |
+      (static_cast<uint64_t>(backing_word(TIMER_BASE + 12u)) << 32);
+
+  xps_intc_isr = backing_word(XPS_INTC_BASE + 0x00u);
+  xps_intc_ier = backing_word(XPS_INTC_BASE + 0x08u);
+  xps_intc_mer = backing_word(XPS_INTC_BASE + 0x1cu);
+
+  ocsdc_regs.clear();
+  for (uint32_t off = 0; off + 4u <= OCSDC_MMIO_SIZE; off += 4u) {
+    ocsdc_regs[OCSDC_BASE + off] = backing_word(OCSDC_BASE + off);
+  }
+
+  refresh_external_interrupt();
+}
+
 void Ref_cpu::exec(const SimConfig &config) {
   // Initialize Spike Reference Simulator if enabled
 #ifdef ENABLE_SPIKE
@@ -1000,7 +1111,19 @@ void Ref_cpu::exec(const SimConfig &config) {
 
   // 准备 GEN_CHECKPOINT 需要的 target_intervals
   std::map<uint32_t, uint32_t> target_intervals;
+  std::map<uint64_t, std::string> special_targets;
   uint32_t finished_intervals = 0;
+
+  auto save_special_checkpoint = [&](const std::string &ckpt_name) {
+    // The legacy interval field is a SimPoint warmup length.  It is unrelated
+    // to an absolute special-checkpoint boundary; serializing the live U-mode
+    // BBV counter here would make simulator CKPT mode prewarm past the saved
+    // CPU state before starting the DUT.
+    const uint64_t live_interval_inst_count = interval_inst_count;
+    interval_inst_count = 0;
+    save_checkpoint(ckpt_name);
+    interval_inst_count = live_interval_inst_count;
+  };
 
   if (config.mode == SimMode::GEN_CHECKPOINT) {
     target_intervals = load_simpoints(config.points_file);
@@ -1013,6 +1136,23 @@ void Ref_cpu::exec(const SimConfig &config) {
                               std::to_string(sp_id) +
                               "_target0_nowarmup.gz"; // 建议加上.gz后缀
       save_checkpoint(ckpt_name);
+    }
+  } else if (config.mode == SimMode::GEN_SPECIAL_CHECKPOINT) {
+    special_targets = load_special_checkpoint_targets(config.points_file);
+    if (special_targets.empty()) {
+      std::cerr << "Error: no special checkpoint targets were loaded."
+                << std::endl;
+      exit(1);
+    }
+    auto zero = special_targets.find(0);
+    if (zero != special_targets.end()) {
+      const std::string ckpt_name =
+          config.checkpoint_dir + "/ckpt_special_" +
+          checkpoint_label(zero->second) + "_inst0.gz";
+      save_special_checkpoint(ckpt_name);
+      special_targets.erase(zero);
+      if (special_targets.empty())
+        sim_end = true;
     }
   } else if (config.mode == SimMode::GEN_BBV) {
     bbv_init_file(config.bbv_output_file.c_str());
@@ -1051,98 +1191,28 @@ void Ref_cpu::exec(const SimConfig &config) {
         // We wait until DUT reaches 0x80000000 to sync state and start
         // difftest.
         if (state.pc == 0x80000000) {
+          spike_ref->sync_all_memory_from_dut(memory, ram_size, sdram_memory,
+                                              SDRAM_SIZE);
           spike_ref->sync_state(state, privilege);
           difftest_started = true;
         }
       } else {
         processor_t *ref_core = spike_ref->sim->get_core(0);
-        state_t *ref_state_before = ref_core->get_state();
-        uint32_t ref_pc_before = static_cast<uint32_t>(ref_state_before->pc);
-        uint32_t ref_ra_before = static_cast<uint32_t>(ref_state_before->XPR[1]);
-        uint32_t ref_sp_before = static_cast<uint32_t>(ref_state_before->XPR[2]);
-        uint32_t dut_pc_after = state.pc;
-        uint32_t dut_insn_last = Instruction;
-
-        auto fetch_ref_insn = [&](uint32_t pc) -> uint32_t {
-          uint32_t val = 0;
-          try {
-            val = ref_core->get_mmu()->load_insn(pc).insn.bits();
-            return val;
-          } catch (...) {
-          }
-          uint32_t phys_pc = pc;
-          if (pc >= 0xc0000000) {
-            phys_pc = pc - 0xc0000000 + 0x80000000;
-          }
-          if (phys_pc >= 0x80000000 &&
-              (phys_pc - 0x80000000 + 4) <= spike_ref->main_mem_ptr->size()) {
-            uint8_t buf[4];
-            if (spike_ref->main_mem_ptr->load(phys_pc - 0x80000000, 4, buf)) {
-              val = static_cast<uint32_t>(buf[0]) |
-                    (static_cast<uint32_t>(buf[1]) << 8) |
-                    (static_cast<uint32_t>(buf[2]) << 16) |
-                    (static_cast<uint32_t>(buf[3]) << 24);
-            }
-          }
-          return val;
-        };
-        uint32_t ref_insn_before = fetch_ref_insn(ref_pc_before);
-
-        spike_ref->step(1);
-
-        state_t *ref_state_after = ref_core->get_state();
-        uint32_t ref_pc_after = static_cast<uint32_t>(ref_state_after->pc);
-        uint32_t ref_mcause = static_cast<uint32_t>(ref_core->get_csr(0x342));
-        uint32_t ref_mepc = static_cast<uint32_t>(ref_core->get_csr(0x341));
-        uint32_t ref_mtvec = static_cast<uint32_t>(ref_core->get_csr(0x305));
-
-        static bool printed_first_ref_fault = false;
-        if (!printed_first_ref_fault && (ref_pc_after == 0 || ref_mcause != 0)) {
-          printed_first_ref_fault = true;
-          uint32_t ref_insn_after = fetch_ref_insn(ref_pc_after);
-          std::cout << "\n[DiffDebug] Spike abnormal step detected\n"
-                    << "  DUT after-step: pc=0x" << std::hex << dut_pc_after
-                    << " last_insn=0x" << dut_insn_last << "\n"
-                    << "  Spike before step: pc=0x" << ref_pc_before
-                    << " insn=0x" << ref_insn_before << " ra=0x" << ref_ra_before
-                    << " sp=0x" << ref_sp_before << "\n"
-                    << "  Spike after  step: pc=0x" << ref_pc_after
-                    << " insn=0x" << ref_insn_after << "\n"
-                    << "  Spike csrs: mepc=0x" << ref_mepc
-                    << " mcause=0x" << ref_mcause << " mtvec=0x" << ref_mtvec
-                    << std::dec << std::endl;
-
-          const uint32_t op = ref_insn_before & 0x7Fu;
-          if (op == 0x03) { // load
-            const uint32_t rs1 = (ref_insn_before >> 15) & 0x1Fu;
-            int32_t imm = static_cast<int32_t>(ref_insn_before) >> 20;
-            uint32_t base = static_cast<uint32_t>(ref_state_before->XPR[rs1]);
-            uint32_t vaddr = static_cast<uint32_t>(base + imm);
-            std::cout << "  Decoded load: rs1=x" << rs1 << " base=0x" << std::hex
-                      << base << " imm=" << std::dec << imm << " vaddr=0x"
-                      << std::hex << vaddr << std::dec << std::endl;
-          } else if (op == 0x23) { // store
-            const uint32_t rs1 = (ref_insn_before >> 15) & 0x1Fu;
-            int32_t imm = static_cast<int32_t>(((ref_insn_before >> 25) << 5) |
-                                               ((ref_insn_before >> 7) & 0x1F));
-            if (imm & 0x800) {
-              imm |= ~0xFFF;
-            }
-            uint32_t base = static_cast<uint32_t>(ref_state_before->XPR[rs1]);
-            uint32_t vaddr = static_cast<uint32_t>(base + imm);
-            std::cout << "  Decoded store: rs1=x" << rs1 << " base=0x" << std::hex
-                      << base << " imm=" << std::dec << imm << " vaddr=0x"
-                      << std::hex << vaddr << std::dec << std::endl;
-          }
-        }
-
-        if (is_io) {
-          // Surgical sync of the destination register after I/O read
-          spike_ref->sync_reg_from_dut(io_reg_idx, state.gpr[io_reg_idx]);
-        } else if (force_sync) {
-          // Sync full architectural state on interrupts or CSR writes
+        if (is_io || force_sync) {
+          // Device/MMIO instructions and interrupt/CSR transitions are owned
+          // by the DUT model.  Do not let Spike execute them independently;
+          // synchronize the post-commit architectural state instead.
           spike_ref->sync_state(state, privilege);
         } else {
+          spike_ref->suppress_async_interrupts();
+          spike_ref->step(1);
+          if (Instruction == INST_WFI) {
+            // The DUT and RefCPU implement WFI as a retiring NOP.  Spike may
+            // enter its internal WFI wait state after retiring the instruction;
+            // clear that non-architectural state without synchronizing CPU
+            // state so the next instruction can be checked normally.
+            ref_core->clear_waiting_for_interrupt();
+          }
           // Strict check: No automatic recovery. Mismatch = Failure.
           spike_ref->reg_check(state, privilege);
         }
@@ -1151,6 +1221,31 @@ void Ref_cpu::exec(const SimConfig &config) {
     }
 
     sim_time++;
+
+    // Special checkpoints use the absolute functional-model instruction count,
+    // independent of U-mode SimPoint interval accounting.  At sim_time == N,
+    // exactly N instructions have completed, so the next instruction is a
+    // deterministic boundary shared by generation and restore.
+    if (config.mode == SimMode::GEN_SPECIAL_CHECKPOINT) {
+      auto target = special_targets.find(sim_time);
+      if (target != special_targets.end()) {
+        const std::string ckpt_name =
+            config.checkpoint_dir + "/ckpt_special_" +
+            checkpoint_label(target->second) + "_inst" +
+            std::to_string(target->first) + ".gz";
+        std::cout << "Creating special checkpoint at absolute instruction "
+                  << target->first << " (" << target->second << ")"
+                  << std::endl;
+        save_special_checkpoint(ckpt_name);
+        special_targets.erase(target);
+        if (special_targets.empty()) {
+          std::cout << "All special checkpoints generated. Simulation "
+                       "finished."
+                    << std::endl;
+          sim_end = true;
+        }
+      }
+    }
 
     // 2. 计数逻辑 (保持和你生成 BBV 时一致，这对 SimPoint 对齐至关重要)
     if (privilege == RISCV_MODE_U && is_br) {
@@ -1288,6 +1383,11 @@ void Ref_cpu::exception(uint32_t trap_val) {
                (page_fault_load && medeleg_page_fault_load) ||
                (page_fault_store && medeleg_page_fault_store);
 
+  if (M_software_interrupt || M_timer_interrupt || M_external_interrupt ||
+      S_software_interrupt || S_timer_interrupt || S_external_interrupt) {
+    force_sync = true;
+  }
+
   if (kLogUserSyscallSummary && privilege == RISCV_MODE_U && ecall) {
     const uint32_t sysno = state.gpr[17];
     if (sysno == 29 || sysno == 56 || sysno == 57 || sysno == 63 ||
@@ -1336,7 +1436,7 @@ void Ref_cpu::exception(uint32_t trap_val) {
                 << " mtvec=0x" << mtvec << " mip=0x" << visible_mip()
                 << " mie=0x" << state.csr[csr_mie]
                 << " cmp=0x" << g_ref_timer_cmp << " now=0x"
-                << ref_timer_now(static_cast<uint32_t>(sim_time)) << std::dec
+                << ref_timer_now(sim_time) << std::dec
                 << std::endl;
     }
 
@@ -1406,7 +1506,7 @@ void Ref_cpu::exception(uint32_t trap_val) {
                 << " stvec=0x" << stvec << " mip=0x" << visible_mip()
                 << " mie=0x" << state.csr[csr_mie]
                 << " cmp=0x" << g_ref_timer_cmp << " now=0x"
-                << ref_timer_now(static_cast<uint32_t>(sim_time)) << std::dec
+                << ref_timer_now(sim_time) << std::dec
                 << std::endl;
     }
 
@@ -1597,7 +1697,7 @@ bool Ref_cpu::take_forced_interrupt(uint32_t cause, uint8_t target_privilege,
 }
 
 void Ref_cpu::RISCV() {
-  sync_timer_csrs(state, static_cast<uint32_t>(sim_time),
+  sync_timer_csrs(state, sim_time,
                   device_effects_enable && interrupt_delivery_enable);
   if (privilege == RISCV_MODE_U) {
     if (current_bb_len == 0) {
@@ -1662,40 +1762,9 @@ void Ref_cpu::RISCV() {
   bool mret = (Instruction == INST_MRET);
   bool sret = (Instruction == INST_SRET);
 
-  if (!ref_only && privilege == RISCV_MODE_U && ecall && state.gpr[17] == 64 &&
-      (state.gpr[10] == 1 || state.gpr[10] == 2)) {
-    const uint32_t buf = state.gpr[11];
-    const uint32_t len = state.gpr[12];
-    const uint32_t limit = len > 4096 ? 4096 : len;
-    for (uint32_t i = 0; i < limit; ++i) {
-      uint32_t paddr = buf + i;
-      if ((state.csr[csr_satp] & 0x80000000u) && privilege != RISCV_MODE_M) {
-        if (!va2pa(paddr, buf + i, 1)) {
-          break;
-        }
-      }
-      const uint32_t word = load_word(paddr & ~0x3u);
-      const uint32_t shift = (paddr & 0x3u) * 8u;
-      const char ch = static_cast<char>((word >> shift) & 0xffu);
-      std::cout << ch;
-      if (observe_uart_console_byte(sim_time, ch)) {
-        sim_end = true;
-      }
-    }
-    std::cout.flush();
-    if (sim_end) {
-      return;
-    }
-    state.gpr[10] = len;
-    state.pc += 4;
-    state.gpr[0] = 0;
-    return;
-  }
-
   // === 优化 2: 快速读取 CSR 状态 ===
   uint32_t mie_reg = state.csr[csr_mie];
-  uint32_t mip_reg = ref_effective_mip(state.csr[csr_mip],
-                                       static_cast<uint32_t>(sim_time),
+  uint32_t mip_reg = ref_effective_mip(state.csr[csr_mip], sim_time,
                                        device_effects_enable &&
                                            interrupt_delivery_enable);
   if (!interrupt_delivery_enable) {
@@ -1729,33 +1798,6 @@ void Ref_cpu::RISCV() {
                (page_fault_inst && medeleg_page_fault_inst);
 
   asy = MTrap || STrap || mret || sret;
-
-  const bool wfi_resume_pending = (mip_reg & mie_reg) != 0;
-
-  // In difftest/ref-only modes, WFI must retire like the DUT model. The DUT
-  // does not sleep the pipeline on WFI during Linux bring-up.
-  if (Instruction == INST_WFI && (ref_only || !device_effects_enable)) {
-    state.pc += 4;
-    state.gpr[0] = 0;
-    return;
-  }
-
-  // WFI sleeps only when there is no pending enabled interrupt source.
-  if (Instruction == INST_WFI && !asy && !wfi_resume_pending &&
-      !page_fault_inst && !page_fault_load && !page_fault_store) {
-    if (kLogVerboseWfi && ((sim_time & 0xfffffu) == 0)) {
-      std::cerr << "[RefCPU][WFI] pc=0x" << std::hex << state.pc
-                << " mip=0x" << visible_mip() << " mie=0x"
-                << state.csr[csr_mie] << " mstatus=0x"
-                << state.csr[csr_mstatus] << " priv=" << std::dec
-                << privilege << " now=0x" << std::hex
-                << ref_timer_now(static_cast<uint32_t>(sim_time))
-                << " cmp=0x" << g_ref_timer_cmp << std::dec << std::endl;
-    }
-    // PC has not been advanced yet in this interpreter path; sleeping WFI
-    // should retry the same instruction, not move to the previous one.
-    return;
-  }
 
   if (page_fault_inst) {
     exception(state.pc);
@@ -1888,13 +1930,11 @@ void Ref_cpu::RV32CSR() {
       observed_csr_value = external_csr_read.value;
     } else if (csr_addr == number_mip) {
       observed_csr_value =
-          ref_effective_mip(state.csr[csr_mip],
-                            static_cast<uint32_t>(sim_time),
+          ref_effective_mip(state.csr[csr_mip], sim_time,
                             device_effects_enable && interrupt_delivery_enable);
     } else if (csr_addr == number_sip) {
       observed_csr_value =
-          ref_effective_mip(state.csr[csr_mip],
-                            static_cast<uint32_t>(sim_time),
+          ref_effective_mip(state.csr[csr_mip], sim_time,
                             device_effects_enable && interrupt_delivery_enable) &
           0x00000333u;
     } else {
@@ -1948,8 +1988,7 @@ void Ref_cpu::RV32CSR() {
         }
         force_sync = true;
         state.csr[csr_sip] =
-            ref_effective_mip(state.csr[csr_mip],
-                              static_cast<uint32_t>(sim_time),
+            ref_effective_mip(state.csr[csr_mip], sim_time,
                               device_effects_enable &&
                                   interrupt_delivery_enable) &
             sip_mask;
@@ -2221,6 +2260,9 @@ void Ref_cpu::RV32A() {
       return;
     }
   }
+  if (!is_ram_range(p_addr, 4)) {
+    is_io = true;
+  }
   check_mem_range_or_log("amo", p_addr, 4);
 
   if (funct5 != 2) {
@@ -2411,10 +2453,9 @@ void Ref_cpu::RV32IM() {
     if ((state.csr[csr_satp] & 0x80000000) && privilege != 3) {
       page_fault_load = !va2pa(p_addr, v_addr, 1);
     }
-    
-    if (p_addr < 0x80000000) {
+
+    if (!is_ram_range(p_addr, access_size)) {
       is_io = true;
-      io_reg_idx = reg_d_index;
     }
 
     if (page_fault_load) {
@@ -2454,10 +2495,10 @@ void Ref_cpu::RV32IM() {
       }
 
       if (device_effects_enable && p_addr == TIMER_BASE) {
-        data = static_cast<uint32_t>(ref_timer_now(static_cast<uint32_t>(sim_time)));
+        data = static_cast<uint32_t>(ref_timer_now(sim_time));
       }
       if (device_effects_enable && p_addr == (TIMER_BASE + 4u)) {
-        data = static_cast<uint32_t>(ref_timer_now(static_cast<uint32_t>(sim_time)) >> 32);
+        data = static_cast<uint32_t>(ref_timer_now(sim_time) >> 32);
       }
       if (device_effects_enable && p_addr == (TIMER_BASE + 8u)) {
         data = static_cast<uint32_t>(g_ref_timer_cmp);
@@ -2485,6 +2526,10 @@ void Ref_cpu::RV32IM() {
 
     if ((state.csr[csr_satp] & 0x80000000) && privilege != 3) {
       page_fault_store = !va2pa(p_addr, v_addr, 2);
+    }
+
+    if (!is_ram_range(p_addr, access_size)) {
+      is_io = true;
     }
 
     if (page_fault_store) {
@@ -2827,7 +2872,10 @@ void Ref_cpu::RV32IM() {
 
 uint32_t Ref_cpu::load_word(uint32_t addr) const {
   const uint32_t word_addr = addr & ~0x3u;
-  if (is_ram_range(word_addr, 4)) {
+  if (is_sdram_range(word_addr, 4)) {
+    return sdram_memory[(word_addr - kSdramBase) >> 2];
+  }
+  if (is_ddr_range(word_addr, 4)) {
     return memory[(word_addr - kRamBase) >> 2];
   }
 
@@ -2853,7 +2901,7 @@ uint32_t Ref_cpu::load_word(uint32_t addr) const {
 void Ref_cpu::store_word(uint32_t addr, uint32_t data) {
   const uint32_t word_addr = addr & ~0x3u;
   if (device_effects_enable && word_addr == TIMER_BASE) {
-    const uint32_t now = static_cast<uint32_t>(sim_time);
+    const uint64_t now = sim_time;
     const uint64_t current = ref_timer_now(now);
     ref_write_timer_value((current & 0xFFFFFFFF00000000ull) |
                               static_cast<uint64_t>(data),
@@ -2861,7 +2909,7 @@ void Ref_cpu::store_word(uint32_t addr, uint32_t data) {
     return;
   }
   if (device_effects_enable && word_addr == (TIMER_BASE + 4u)) {
-    const uint32_t now = static_cast<uint32_t>(sim_time);
+    const uint64_t now = sim_time;
     const uint64_t current = ref_timer_now(now);
     ref_write_timer_value((static_cast<uint64_t>(data) << 32) |
                               (current & 0x00000000FFFFFFFFull),
@@ -2874,7 +2922,7 @@ void Ref_cpu::store_word(uint32_t addr, uint32_t data) {
     if (kLogVerboseTimer) {
       std::cerr << "[RefCPU][TIMER] mtimecmp_lo <- 0x" << std::hex << data
                 << " full=0x" << g_ref_timer_cmp << " now=0x"
-                << ref_timer_now(static_cast<uint32_t>(sim_time)) << std::dec
+                << ref_timer_now(sim_time) << std::dec
                 << std::endl;
     }
     return;
@@ -2885,12 +2933,16 @@ void Ref_cpu::store_word(uint32_t addr, uint32_t data) {
     if (kLogVerboseTimer) {
       std::cerr << "[RefCPU][TIMER] mtimecmp_hi <- 0x" << std::hex << data
                 << " full=0x" << g_ref_timer_cmp << " now=0x"
-                << ref_timer_now(static_cast<uint32_t>(sim_time)) << std::dec
+                << ref_timer_now(sim_time) << std::dec
                 << std::endl;
     }
     return;
   }
-  if (is_ram_range(word_addr, 4)) {
+  if (is_sdram_range(word_addr, 4)) {
+    sdram_memory[(word_addr - kSdramBase) >> 2] = data;
+    return;
+  }
+  if (is_ddr_range(word_addr, 4)) {
     memory[(word_addr - kRamBase) >> 2] = data;
     return;
   }

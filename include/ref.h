@@ -131,7 +131,8 @@ enum class SimMode {
   NORMAL,         // 0. 正常从头运行 (无 BBV，无 Checkpoint)
   GEN_BBV,        // 1. 生成 BBV 文件 (用于 SimPoint 分析)
   GEN_CHECKPOINT, // 2. 根据 SimPoint 结果 (.points) 生成 Checkpoints
-  RESTORE         // 3. 从 Checkpoint 恢复并运行指定长度 (Detailed Run)
+  RESTORE,        // 3. 从 Checkpoint 恢复并运行指定长度 (Detailed Run)
+  GEN_SPECIAL_CHECKPOINT // 4. 在绝对指令计数处生成 special checkpoints
 };
 
 // --- 2. 配置结构体 ---
@@ -178,7 +179,8 @@ struct ReadOverride {
 class Ref_cpu {
 public:
   ~Ref_cpu();
-  uint32_t *memory;
+  uint32_t *memory = nullptr;
+  uint32_t *sdram_memory = nullptr;
   std::unordered_map<uint32_t, uint32_t> io_words;
   uint32_t ram_size;
   uint32_t Instruction;
@@ -206,7 +208,6 @@ public:
   bool sim_end;
   uint64_t sim_time;
   bool is_io;
-  int io_reg_idx;
   bool force_sync;
   bool uart_print = false;
   bool ref_only = false;
@@ -237,6 +238,9 @@ public:
   void xps_intc_set_irq_level(uint32_t irq_id, bool asserted);
   void refresh_external_interrupt();
   void uart_refresh_interrupt();
+  uint32_t checkpoint_mmio_read_word(uint32_t word_addr) const;
+  void checkpoint_mmio_write_backing(uint32_t word_addr, uint32_t data);
+  void checkpoint_mmio_sync_devices();
   void exec(const SimConfig &config);
   bool va2pa(uint32_t &p_addr, uint32_t v_addr, uint32_t type);
   void RISCV();
